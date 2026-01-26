@@ -184,6 +184,14 @@ This phase provisions the shared AWS infrastructure that all migrated applicatio
     - Outbound Rules:
       - All traffic to VPC CIDR
     - **Important:** No `0.0.0.0/0` rules—this ALB is private only
+    - **⚠️ Note: Allow full VPC CIDR, not just private subnets**
+      - Internal ALB may receive traffic from:
+        - Other ECS tasks (private subnets)
+        - Lambda functions (could be in public or private subnets)
+        - EC2 instances in public subnets
+        - VPN/Direct Connect connections
+      - Safest approach: Allow entire VPC CIDR (`10.100.0.0/20`)
+      - Still internal-only (not exposed to internet)
   - **HTTP Listener (Port 80):**
     - Protocol: HTTP (TLS not required for internal VPC traffic)
     - Default Action: Return fixed 404 response
@@ -411,6 +419,22 @@ This phase provisions the shared AWS infrastructure that all migrated applicatio
     - If services need to call each other by name
     - Creates Cloud Map namespace for internal DNS
     - Example: `auth-api.production.local`
+  - **⚠️ CRITICAL: Do NOT use Service Connect for Strangler Fig Migration**
+    - **The Problem:**
+      - Service Connect creates service mesh networking with its own load balancing
+      - Strangler Fig pattern requires weighted routing at the ALB level
+      - Service Connect + ALB weighted routing **do not work together**
+      - You cannot gradually shift traffic from EC2 to Fargate using Service Connect
+    - **For this migration: Use Internal ALB instead**
+      - ✅ Phase 2: Deploy Internal ALB with Target Groups for EC2 and Fargate
+      - ✅ Phase 3: Use ALB listener rules to weight traffic (90% EC2 → 10% Fargate)
+      - ✅ Phase 4: Gradually shift weights (50/50 → 10/90 → 0/100)
+      - ❌ DO NOT enable Service Connect until migration is complete
+    - **After migration is complete:**
+      - Service Connect can be enabled for new greenfield services
+      - Service Connect is excellent for service-to-service communication
+      - Not suitable for brownfield migration with weighted routing
+
   - **Tags:**
     - `Environment: production`
     - `ManagedBy: platform-team`
@@ -419,6 +443,8 @@ This phase provisions the shared AWS infrastructure that all migrated applicatio
   - ✅ Cluster status is "Active"
   - ✅ Capacity providers configured (FARGATE at minimum)
   - ✅ Container Insights enabled
+  - ✅ **Service Connect namespace created but NOT enabled on services yet**
+  - ✅ **Internal ALB created for Strangler Fig pattern (see Infrastructure Setup phase)**
   - ✅ Cluster visible in ECS console with all services
 
 ---
@@ -660,6 +686,9 @@ This phase provisions the shared AWS infrastructure that all migrated applicatio
           - Why: M1/M2/M3 Macs build `arm64` by default; Fargate expects `amd64`
           - Symptom if wrong: `exec format error` on container start
           - NOTE: "auth-api" is the name you will use
+          - **⚠️ CRITICAL: If using nginx or other seed image, ensure port matches your actual app port**
+          - If your app runs on port 3000, don't use nginx on port 80
+          - Otherwise health checks will fail when you swap to the real app
 
     3.  **Tag Image:**
 
@@ -883,6 +912,136 @@ This phase provisions the shared AWS infrastructure that all migrated applicatio
   - ✅ Permissions scoped to specific resources (not `*`)
   - ✅ No AWS credentials hardcoded in application
   - ✅ Application can access required AWS services when running in Fargate
+
+---
+
+### Story 5.3: Configure Deployer IAM Permissions
+
+- **Title:** Grant CI/CD Pipeline Permission to Deploy ECS Services
+- **Persona:** As a **DevOps engineer**, I need the CI/CD deployer role to have `iam:PassRole` permission so that GitHub Actions can deploy ECS services with the correct Task and Execution Roles.
+
+- **Requirements:**
+  - CI/CD deployer can register task definitions
+  - CI/CD deployer can update ECS services
+  - CI/CD deployer can pass Task Role and Execution Role to ECS
+  - Permissions follow least-privilege principle
+
+- **Implementation Details:**
+  - **The Problem:**
+    - When GitHub Actions runs `aws ecs register-task-definition`, it needs to specify:
+      - `taskRoleArn` (role the application uses)
+      - `executionRoleArn` (role ECS uses to pull image and fetch secrets)
+    - **Without `iam:PassRole`, deployment fails with:**
+      ```
+      User: arn:aws:sts::123456789012:assumed-role/GitHubActionsDeployerRole/...
+      is not authorized to perform: iam:PassRole on resource: arn:aws:iam::123456789012:role/ECSTaskRole
+      ```
+  - **Create Deployer Role Policy:**
+
+    ```hcl
+    # terraform/iam-deployer.tf
+
+    resource "aws_iam_role" "github_actions_deployer" {
+      name = "GitHubActionsDeployerRole"
+
+      assume_role_policy = jsonencode({
+        Version = "2012-10-17"
+        Statement = [{
+          Effect = "Allow"
+          Principal = {
+            Federated = aws_iam_openid_connect_provider.github.arn
+          }
+          Action = "sts:AssumeRoleWithWebIdentity"
+          Condition = {
+            StringEquals = {
+              "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+            }
+            StringLike = {
+              "token.actions.githubusercontent.com:sub" = "repo:my-org/my-repo:*"
+            }
+          }
+        }]
+      })
+    }
+
+    resource "aws_iam_role_policy" "deployer_ecs" {
+      name = "ECSDeploymentPolicy"
+      role = aws_iam_role.github_actions_deployer.id
+
+      policy = jsonencode({
+        Version = "2012-10-17"
+        Statement = [
+          {
+            Sid = "ECSDeployment"
+            Effect = "Allow"
+            Action = [
+              "ecs:RegisterTaskDefinition",
+              "ecs:DeregisterTaskDefinition",
+              "ecs:DescribeTaskDefinition",
+              "ecs:DescribeServices",
+              "ecs:UpdateService",
+              "ecs:ListTasks",
+              "ecs:DescribeTasks"
+            ]
+            Resource = "*"
+          },
+          {
+            Sid = "PassRoleToECS"
+            Effect = "Allow"
+            Action = "iam:PassRole"
+            Resource = [
+              aws_iam_role.ecs_task_role.arn,
+              aws_iam_role.ecs_execution_role.arn
+            ]
+            Condition = {
+              StringEquals = {
+                "iam:PassedToService": "ecs-tasks.amazonaws.com"
+              }
+            }
+          },
+          {
+            Sid = "ECRAccess"
+            Effect = "Allow"
+            Action = [
+              "ecr:GetAuthorizationToken",
+              "ecr:BatchCheckLayerAvailability",
+              "ecr:GetDownloadUrlForLayer",
+              "ecr:BatchGetImage"
+            ]
+            Resource = "*"
+          }
+        ]
+      })
+    }
+    ```
+
+  - **Least-privilege PassRole:**
+    - **Restrict to specific roles:** Only allow passing the Task and Execution roles (not all roles)
+    - **Restrict to ECS service:** `Condition: iam:PassedToService = ecs-tasks.amazonaws.com`
+    - This prevents deployer from passing arbitrary roles to other services
+  - **Test deployment:**
+
+    ```bash
+    # Assume deployer role
+    aws sts assume-role --role-arn arn:aws:iam::123456789012:role/GitHubActionsDeployerRole
+
+    # Try registering task definition
+    aws ecs register-task-definition \
+      --family my-app \
+      --task-role-arn arn:aws:iam::123456789012:role/ECSTaskRole \
+      --execution-role-arn arn:aws:iam::123456789012:role/ECSExecutionRole \
+      --container-definitions '[...]'
+
+    # Should succeed with iam:PassRole permission
+    ```
+
+- **Acceptance Criteria:**
+  - ✅ Deployer role created with OIDC trust for GitHub Actions
+  - ✅ `iam:PassRole` permission granted for Task and Execution roles only
+  - ✅ Condition restricts PassRole to `ecs-tasks.amazonaws.com`
+  - ✅ CI/CD pipeline can register task definitions
+  - ✅ CI/CD pipeline can update ECS services
+  - ✅ Attempting to pass other IAM roles fails (security test)
 
 ---
 

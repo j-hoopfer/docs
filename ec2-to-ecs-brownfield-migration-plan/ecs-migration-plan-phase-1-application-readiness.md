@@ -36,7 +36,155 @@ This migration represents a shift to the **12-Factor App** methodology—moving 
 
 ---
 
-### Story 1.2: Eliminate Ephemeral Filesystem Dependencies
+### Story 1.2: Handle PID 1 and Zombie Processes
+
+- **Title:** Configure Init Process for Proper Signal Handling
+- **Persona:** As a **developer**, I need the container to properly handle signals and reap zombie processes so that graceful shutdown works correctly and the container doesn't accumulate zombie processes over time.
+
+- **Requirements:**
+  - Container must properly handle SIGTERM for graceful shutdown
+  - Container must reap zombie child processes
+  - Application runtime must not run as PID 1 (unless it handles signals natively)
+  - Solution must work for Node.js, Python, Java, and other runtimes
+
+- **Implementation Details:**
+  - **The Problem:**
+    - In Docker, the first process (PID 1) has special responsibilities:
+      1. **Signal forwarding:** PID 1 must forward SIGTERM to child processes
+      2. **Zombie reaping:** PID 1 must reap zombie (defunct) child processes
+    - Most application runtimes (Node.js, Python, Java) do NOT handle these responsibilities
+    - **What happens without proper init:**
+      - App doesn't shut down gracefully on `docker stop` (waits 30s, then SIGKILL)
+      - Zombie processes accumulate if app spawns child processes
+      - Container becomes unstable over time
+  - **Solution 1: Use `tini` in Dockerfile (Recommended for all apps)**
+
+    `tini` is a lightweight init system that:
+    - Forwards signals to child processes
+    - Reaps zombie processes
+    - Adds only ~100KB to image size
+
+    **Update Dockerfile:**
+
+    ```dockerfile
+    FROM node:22-slim
+
+    # Install tini
+    RUN apt-get update && apt-get install -y tini && rm -rf /var/lib/apt/lists/*
+
+    WORKDIR /app
+    COPY package*.json ./
+    RUN npm ci --production
+    COPY . .
+
+    EXPOSE 3000
+
+    # Use tini as PID 1
+    ENTRYPOINT ["/usr/bin/tini", "--"]
+    CMD ["node", "server.js"]
+    ```
+
+    **For Alpine-based images:**
+
+    ```dockerfile
+    FROM node:22-alpine
+
+    # tini is available in Alpine repos
+    RUN apk add --no-cache tini
+
+    ENTRYPOINT ["/sbin/tini", "--"]
+    CMD ["node", "server.js"]
+    ```
+
+  - **Solution 2: Use ECS Task Definition `initProcessEnabled` (ECS-specific)**
+
+    ECS can inject an init process without modifying the Dockerfile:
+
+    ```json
+    {
+      "family": "my-app",
+      "containerDefinitions": [
+        {
+          "name": "app",
+          "image": "my-app:latest",
+          "linuxParameters": {
+            "initProcessEnabled": true
+          }
+        }
+      ]
+    }
+    ```
+
+    **Pros:**
+    - No Dockerfile changes required
+    - Works with existing images
+    - ECS-native solution
+
+    **Cons:**
+    - Only works in ECS (not locally or in other orchestrators)
+    - Less explicit than Dockerfile approach
+
+  - **Solution 3: Use `dumb-init` (Alternative to tini)**
+
+    Similar to tini but with different behavior:
+
+    ```dockerfile
+    RUN wget -O /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v1.2.5/dumb-init_1.2.5_amd64 \
+        && chmod +x /usr/local/bin/dumb-init
+
+    ENTRYPOINT ["/usr/local/bin/dumb-init", "--"]
+    CMD ["node", "server.js"]
+    ```
+
+  - **Verify PID 1 handling:**
+
+    **Test signal forwarding:**
+
+    ```bash
+    # Run container
+    docker run -d --name test-app my-app:latest
+
+    # Send SIGTERM
+    docker stop test-app
+
+    # Check logs - should see graceful shutdown message within 5 seconds
+    docker logs test-app
+
+    # If container takes 30 seconds to stop, signal forwarding is broken
+    ```
+
+    **Test zombie reaping:**
+
+    ```bash
+    # Exec into running container
+    docker exec test-app ps aux
+
+    # Look for <defunct> processes
+    # Should NOT see lines like:
+    # node      123  0.0  0.0      0     0 ?        Z    14:23   0:00 [node] <defunct>
+    ```
+
+  - **Application-specific notes:**
+
+    | Runtime         | Native Signal Handling?                      | Recommendation                     |
+    | --------------- | -------------------------------------------- | ---------------------------------- |
+    | **Node.js**     | ❌ No (unless you manually handle SIGTERM)   | **Use tini or initProcessEnabled** |
+    | **Python**      | ❌ No (unless using signal module)           | **Use tini or initProcessEnabled** |
+    | **Java**        | ⚠️ Partial (handles SIGTERM but not zombies) | **Use tini or initProcessEnabled** |
+    | **Go**          | ✅ Yes (if properly coded)                   | Optional (but tini adds safety)    |
+    | **Nginx**       | ✅ Yes                                       | No init needed                     |
+    | **Bash script** | ❌ No                                        | **Absolutely use tini**            |
+
+- **Acceptance Criteria:**
+  - ✅ `tini` or `dumb-init` added to Dockerfile, OR `initProcessEnabled: true` set in task definition
+  - ✅ Container stops gracefully within 10 seconds when sent SIGTERM
+  - ✅ No zombie (`<defunct>`) processes accumulate during 24-hour run test
+  - ✅ Application logs show graceful shutdown message
+  - ✅ Load test with process spawning (if applicable) shows no zombie accumulation
+
+---
+
+### Story 1.3: Eliminate Ephemeral Filesystem Dependencies
 
 - **Title:** Eliminate Ephemeral Filesystem Dependencies
 - **Persona:** As a **developer**, I need to remove all reliance on local filesystem storage so that the application continues to function when containers are destroyed and recreated.
@@ -89,6 +237,224 @@ This migration represents a shift to the **12-Factor App** methodology—moving 
 
 ---
 
+### Story 1.5: Build Multi-Architecture Container Images
+
+- **Title:** Support ARM64 (Graviton) for Cost Savings
+- **Persona:** As a **DevOps engineer**, I want to build multi-architecture (amd64 + arm64) container images so that I can optionally run on AWS Graviton processors for 20% cost savings.
+
+- **Requirements:**
+  - Build images for both amd64 (Intel/AMD) and arm64 (Graviton) architectures
+  - Publish multi-architecture manifest to ECR
+  - Verify application works on both architectures
+
+- **Implementation Details:**
+  - **Why multi-architecture:**
+    - **AWS Graviton (ARM64) Fargate pricing is ~20% cheaper** than x86_64
+    - Example: 1 vCPU + 2GB Fargate task
+      - x86_64: $0.04856/hour
+      - ARM64 (Graviton): $0.03885/hour
+      - **Savings: $0.00971/hour = $7.09/month per task**
+    - For 10 tasks running 24/7: **$70/month savings**
+  - **Use Docker Buildx for multi-architecture builds:**
+
+    **Create builder (one-time setup):**
+
+    ```bash
+    docker buildx create --name multi-arch --use
+    docker buildx inspect --bootstrap
+    ```
+
+    **Update Dockerfile to be ARM-compatible:**
+    - Most base images support multi-arch: `node:22-slim`, `python:3.11-slim`, `openjdk:17-slim`
+    - Check for native dependencies (e.g., compiled Python packages)
+    - Use `apt-get` or `apk` for dependencies (not pre-compiled binaries)
+
+    **Build and push multi-architecture image:**
+
+    ```bash
+    # Login to ECR
+    aws ecr get-login-password --region us-east-1 | \
+      docker login --username AWS --password-stdin 123456789012.dkr.ecr.us-east-1.amazonaws.com
+
+    # Build for both architectures
+    docker buildx build \
+      --platform linux/amd64,linux/arm64 \
+      -t 123456789012.dkr.ecr.us-east-1.amazonaws.com/my-app:latest \
+      --push \
+      .
+    ```
+
+  - **Update ECS Task Definition to use ARM64:**
+
+    ```json
+    {
+      "family": "my-app",
+      "cpu": "256",
+      "memory": "512",
+      "runtimePlatform": {
+        "cpuArchitecture": "ARM64",
+        "operatingSystemFamily": "LINUX"
+      },
+      "containerDefinitions": [...]
+    }
+    ```
+
+    Or stick with x86_64 (Fargate auto-selects based on runtimePlatform):
+
+    ```json
+    "runtimePlatform": {
+      "cpuArchitecture": "X86_64",
+      "operatingSystemFamily": "LINUX"
+    }
+    ```
+
+  - **Verify multi-arch manifest:**
+
+    ```bash
+    docker buildx imagetools inspect \
+      123456789012.dkr.ecr.us-east-1.amazonaws.com/my-app:latest
+
+    # Should see:
+    # MediaType: application/vnd.docker.distribution.manifest.list.v2+json
+    # Manifests:
+    #   - linux/amd64
+    #   - linux/arm64
+    ```
+
+  - **Common ARM64 compatibility issues:**
+
+    | Issue                                       | Solution                                                  |
+    | ------------------------------------------- | --------------------------------------------------------- |
+    | **Native npm packages** (e.g., `node-sass`) | Use pure JS alternatives or ensure package supports ARM64 |
+    | **Pre-compiled binaries** in Dockerfile     | Use `apt-get` or compile from source                      |
+    | **Alpine Linux musl issues**                | Use Debian-based images (`-slim`) instead                 |
+    | **Java JIT performance**                    | Graviton performs very well with Java - no issues         |
+
+- **Acceptance Criteria:**
+  - ✅ Multi-architecture image built for amd64 and arm64
+  - ✅ Image pushed to ECR with multi-arch manifest
+  - ✅ Application tested on both x86_64 and ARM64 Fargate
+  - ✅ CI/CD pipeline updated to build multi-arch images
+  - ✅ Team trained on switching between architectures via `runtimePlatform`
+  - ✅ Cost savings documented and tracked
+
+---
+
+### Story 1.6: Establish Local Development Parity with docker-compose
+
+- **Title:** Ensure Local Environment Matches ECS Production
+- **Persona:** As a **developer**, I want a local Docker Compose environment that matches ECS so that I can test integrations (database, Redis, secrets) before deployment.
+
+- **Requirements:**
+  - Developers can run full stack locally with `docker-compose up`
+  - Local environment uses the same container images as ECS
+  - Local environment includes database, Redis, and application
+  - Configuration matches ECS as closely as possible
+
+- **Implementation Details:**
+  - **Create `docker-compose.yml` for local development:**
+
+    ```yaml
+    version: "3.8"
+
+    services:
+      # Application
+      app:
+        build: .
+        ports:
+          - "3000:3000"
+        environment:
+          NODE_ENV: development
+          DB_HOST: db
+          DB_PORT: 3306
+          DB_NAME: myapp
+          DB_USER: root
+          DB_PASSWORD: localpassword
+          REDIS_HOST: redis
+          REDIS_PORT: 6379
+        depends_on:
+          db:
+            condition: service_healthy
+          redis:
+            condition: service_started
+        healthcheck:
+          test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+          interval: 10s
+          timeout: 5s
+          retries: 3
+
+      # MySQL (matches RDS version)
+      db:
+        image: mysql:8.0
+        environment:
+          MYSQL_ROOT_PASSWORD: localpassword
+          MYSQL_DATABASE: myapp
+        ports:
+          - "3306:3306"
+        volumes:
+          - mysql_data:/var/lib/mysql
+        healthcheck:
+          test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+          interval: 5s
+          timeout: 3s
+          retries: 5
+
+      # Redis (matches ElastiCache version)
+      redis:
+        image: redis:7-alpine
+        ports:
+          - "6379:6379"
+
+    volumes:
+      mysql_data:
+    ```
+
+  - **Developer workflow:**
+
+    ```bash
+    # Start full stack
+    docker-compose up -d
+
+    # View logs
+    docker-compose logs -f app
+
+    # Run migrations
+    docker-compose exec app npm run migrate
+
+    # Stop stack
+    docker-compose down
+    ```
+
+  - **Match ECS environment variables:**
+    - Use `.env` file for local overrides:
+      ```bash
+      # .env (gitignored)
+      DB_PASSWORD=localpassword
+      AWS_REGION=us-east-1
+      ```
+    - Document which env vars differ between local and ECS
+    - Use same secret names where possible
+  - **Local vs ECS differences to document:**
+
+    | Aspect                | Local (docker-compose)          | ECS Production             |
+    | --------------------- | ------------------------------- | -------------------------- |
+    | **Database**          | MySQL container                 | RDS MySQL                  |
+    | **Secrets**           | Environment variables           | Secrets Manager            |
+    | **Networking**        | Bridge network                  | VPC with subnets           |
+    | **Service Discovery** | Container names (`db`, `redis`) | RDS/ElastiCache endpoints  |
+    | **IAM**               | No IAM                          | Task Role + Execution Role |
+
+- **Acceptance Criteria:**
+  - ✅ `docker-compose up` starts full stack (app + database + Redis)
+  - ✅ Application connects to local database and Redis
+  - ✅ Health checks pass locally
+  - ✅ Migrations run successfully via docker-compose
+  - ✅ New developers can onboard with README instructions
+  - ✅ Local environment documented in `README.md`
+  - ✅ `.env.example` file provided with all required variables
+
+---
+
 ## Feature 2: Externalized Configuration
 
 ### Story 2.1: Migrate Configuration to Environment Variables
@@ -108,6 +474,7 @@ This migration represents a shift to the **12-Factor App** methodology—moving 
   - Create a config validation layer that checks for required variables at startup
   - Document all required environment variables in a `README` or `.env.example`
   - **How secrets will flow (for context):**
+
     ```
     ┌─────────────────────┐      ┌─────────────────────┐      ┌─────────────────────┐
     │  Secrets Manager    │ ───▶ │  ECS Task Def       │ ───▶ │  Your App           │
@@ -120,6 +487,7 @@ This migration represents a shift to the **12-Factor App** methodology—moving 
     - **Phase 2 (Story 4.1):** Infra team creates secrets in AWS Secrets Manager
     - **Phase 3 (Task Definition):** ECS injects Secrets Manager values as environment variables
     - **Your app doesn't need to know about Secrets Manager** — it just reads env vars like normal
+
   - **Backward compatibility during migration:**
     - On EC2: Secrets come from `.env` file loaded by PM2/supervisor
     - On ECS: Secrets come from Secrets Manager injected as env vars
@@ -402,22 +770,231 @@ This migration represents a shift to the **12-Factor App** methodology—moving 
 - **Requirements:**
   - Dedicated health check endpoint (e.g., `/health` or `/healthz`)
   - Health check must respond within ALB timeout (default 5 seconds)
-  - Health check should verify critical dependencies (DB, Redis) are reachable
+  - Health check should be lightweight (basic process health)
   - Health check must not require authentication
 
 - **Implementation Details:**
   - Create lightweight `/health` endpoint that returns `200 OK`
-  - Optionally add `/health/ready` (readiness) vs `/health/live` (liveness) endpoints
-  - Readiness check: verify DB connection, Redis connection, required services
-  - Liveness check: simple ping (app process is running)
+  - Keep this endpoint simple—just verify the process is running
+  - Response should be fast (< 100ms) and not check dependencies yet
   - Configure ALB Target Group health check path, interval, and thresholds
   - Configure ECS health check in task definition if using `HEALTHCHECK` in Dockerfile
 
 - **Acceptance Criteria:**
-  - ✅ `/health` returns `200 OK` within 2 seconds
+  - ✅ `/health` returns `200 OK` within 100ms
   - ✅ ALB marks task as healthy after deployment
   - ✅ Unhealthy tasks are automatically replaced by ECS
   - ✅ Health check failures visible in ALB metrics
+
+---
+
+### Story 9.2: Implement Dependency Health Checks
+
+- **Title:** Add Deep Health Checks for Downstream Dependencies
+- **Persona:** As a **DevOps engineer**, I need the application to verify that critical dependencies (database, Redis, external APIs) are reachable before accepting traffic so that users don't get 500 errors from a running container that can't actually serve requests.
+
+- **Requirements:**
+  - Separate health check endpoint for readiness (e.g., `/health/ready`)
+  - Must verify database connectivity
+  - Must verify Redis/cache connectivity (if used)
+  - Must verify critical external API availability (if required)
+  - Must fail fast if dependencies are unavailable
+  - Must not impact basic liveness check (`/health`)
+
+- **Implementation Details:**
+
+  **Readiness vs Liveness Pattern:**
+
+  ```
+  /health        → Liveness  (Is the process alive?)
+  /health/ready  → Readiness (Can the app handle traffic?)
+  ```
+
+  - **Liveness** (`/health`): Already implemented in Story 9.1
+    - Quick check (< 100ms)
+    - Returns 200 if process is running
+    - Used by: ALB health checks, Docker HEALTHCHECK
+
+  - **Readiness** (`/health/ready`): This story
+    - Deep check (< 5s timeout)
+    - Verifies all dependencies are reachable
+    - Returns 503 if any dependency is down
+    - Used by: ECS readiness checks, pre-traffic validation
+
+  **Implementation Example (Node.js/Express):**
+
+  ```javascript
+  import express from "express";
+  import mysql from "mysql2/promise";
+  import Redis from "ioredis";
+
+  const app = express();
+
+  // Liveness (fast)
+  app.get("/health", (req, res) => {
+    res.status(200).json({ status: "ok" });
+  });
+
+  // Readiness (deep)
+  app.get("/health/ready", async (req, res) => {
+    const checks = {
+      database: false,
+      redis: false,
+      externalApi: false,
+    };
+
+    try {
+      // Check database
+      const dbConnection = await mysql.createConnection({
+        host: process.env.DB_HOST,
+        user: process.env.DB_USER,
+        password: process.env.DB_PASSWORD,
+        database: process.env.DB_NAME,
+        connectTimeout: 3000,
+      });
+      await dbConnection.ping();
+      await dbConnection.end();
+      checks.database = true;
+    } catch (err) {
+      console.error("Database health check failed:", err.message);
+    }
+
+    try {
+      // Check Redis
+      const redisClient = new Redis({
+        host: process.env.REDIS_HOST,
+        port: process.env.REDIS_PORT,
+        password: process.env.REDIS_AUTH_TOKEN,
+        connectTimeout: 3000,
+        lazyConnect: true,
+      });
+      await redisClient.connect();
+      await redisClient.ping();
+      redisClient.disconnect();
+      checks.redis = true;
+    } catch (err) {
+      console.error("Redis health check failed:", err.message);
+    }
+
+    try {
+      // Check external API (optional)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      const response = await fetch(process.env.EXTERNAL_API_URL + "/status", {
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      checks.externalApi = response.ok;
+    } catch (err) {
+      console.error("External API health check failed:", err.message);
+    }
+
+    // Determine overall status
+    const allHealthy = Object.values(checks).every((status) => status === true);
+
+    if (allHealthy) {
+      res.status(200).json({ status: "ready", checks });
+    } else {
+      res.status(503).json({ status: "not ready", checks });
+    }
+  });
+  ```
+
+  **Connection Pooling Consideration:**
+  - If using connection pooling, test pool health instead of creating new connections
+  - Example:
+    ```javascript
+    // Use existing pool
+    await dbPool.query("SELECT 1");
+    ```
+
+  **Caching Strategy:**
+  - For high-traffic apps, cache health check results for 5-10 seconds
+  - Prevents overwhelming dependencies with health check requests
+  - Example:
+
+    ```javascript
+    let cachedStatus = { healthy: false, timestamp: 0 };
+    const CACHE_TTL = 5000; // 5 seconds
+
+    if (Date.now() - cachedStatus.timestamp > CACHE_TTL) {
+      // Run checks and update cache
+      cachedStatus = { healthy: runChecks(), timestamp: Date.now() };
+    }
+    return cachedStatus.healthy ? 200 : 503;
+    ```
+
+  **Critical: Avoid the "Health Check Suicide Pact"**
+  - **The Problem:**
+    - If ALL tasks check database/Redis in their health check
+    - And the database has a brief outage (10 seconds)
+    - ALL tasks fail health check simultaneously
+    - ECS kills the entire fleet
+    - Even when the database recovers, you have zero running tasks
+  - **The Solution: Separate Liveness from Readiness**
+
+    | Endpoint        | Purpose       | Checks                  | Used By                    | Failure Impact                 |
+    | --------------- | ------------- | ----------------------- | -------------------------- | ------------------------------ |
+    | `/health`       | **Liveness**  | Process alive?          | ALB Target Group           | ALB stops routing to THIS task |
+    | `/health/ready` | **Readiness** | Dependencies reachable? | ECS Container Health Check | ECS replaces THIS task         |
+
+  - **Configuration:**
+
+    **ALB Target Group (LIVENESS - Fast, Shallow):**
+
+    ```hcl
+    resource "aws_lb_target_group" "app" {
+      health_check {
+        enabled             = true
+        path                = "/health"        # Shallow check
+        healthy_threshold   = 2
+        unhealthy_threshold = 2
+        timeout             = 5
+        interval            = 30
+        matcher             = "200"
+      }
+    }
+    ```
+
+    **ECS Task Definition (READINESS - Deep, with high retry tolerance):**
+
+    ```json
+    {
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "curl -f http://localhost:3000/health/ready || exit 1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 5, // High retries to tolerate brief DB blips
+        "startPeriod": 60
+      }
+    }
+    ```
+
+  - **Why this works:**
+    - **Database blips:** Tasks fail readiness check, but ALB keeps routing (liveness still passes)
+    - **Task-specific issues:** If one task's DB connection is bad, only that task is replaced
+    - **Fleet protection:** Database outage doesn't kill all tasks simultaneously
+    - **High retry count (5):** Task survives 5 consecutive failures = 2.5 minutes of DB downtime before being replaced
+
+  **Startup Behavior:**
+  - `/health` should return 200 immediately
+  - `/health/ready` may return 503 until connection pools are initialized
+  - Configure `startPeriod` in ECS to allow warm-up time
+
+- **Acceptance Criteria:**
+  - ✅ `/health` returns 200 when all dependencies are available
+  - ✅ `/health/ready` returns 200 when all dependencies are available
+  - ✅ `/health/ready` returns 503 when database is down
+  - ✅ **ALB health check points to `/health` (liveness), NOT `/health/ready`**
+  - ✅ **ECS container health check points to `/health/ready` with retries >= 5**
+  - ✅ Response includes individual check status in JSON
+  - ✅ Health check completes within 5 seconds
+  - ✅ Failed dependency checks log error messages
+  - ✅ **Tested: Database outage for 30 seconds does NOT kill all tasks**
+  - ✅ Container survives temporary dependency failures (doesn't crash)
 
 ---
 
@@ -464,20 +1041,77 @@ This migration represents a shift to the **12-Factor App** methodology—moving 
   - Connections must be released properly on shutdown
 
 - **Implementation Details:**
-  - Calculate max pool size: `RDS max_connections / expected max tasks` (leave headroom)
-  - Configure connection pool in application:
+  - **Strongly Recommended: Use RDS Proxy for Connection Management**
+
+    **The Problem with Direct Connections:**
+    - Auto-scaling can spike task count unexpectedly (e.g., 2 tasks → 20 tasks in 60 seconds)
+    - Each task opens `pool_size` connections immediately
+    - **Risk:** 20 tasks × 10 connections = 200 connections, exceeding RDS `max_connections` (150)
+    - Result: New tasks fail to start, deployment fails, alert storm
+
+    **RDS Proxy Solution:**
+    - **Connection multiplexing:** 100 app connections → 10 actual database connections
+    - **Automatic scaling:** Proxy handles connection management, not your app
+    - **Built-in retry logic:** Transient connection failures are retried automatically
+    - **Zero code changes:** Just change connection string
+
+    **Setup:**
+
+    ```bash
+    aws rds create-db-proxy \
+      --db-proxy-name my-app-proxy \
+      --engine-family MYSQL \
+      --auth [{
+        "AuthScheme": "SECRETS",
+        "SecretArn": "arn:aws:secretsmanager:..."
+      }] \
+      --role-arn arn:aws:iam::ACCOUNT:role/RDSProxyRole \
+      --vpc-subnet-ids subnet-xxx subnet-yyy \
+      --require-tls true
+    ```
+
+    **Update connection string:**
+
+    ```javascript
+    // Before (direct RDS connection)
+    const pool = mysql.createPool({
+      host: 'mydb.abc123.us-east-1.rds.amazonaws.com',
+      ...
+    });
+
+    // After (via RDS Proxy)
+    const pool = mysql.createPool({
+      host: 'my-app-proxy.proxy-abc123.us-east-1.rds.amazonaws.com',
+      ...
+    });
+    ```
+
+    **Cost:**
+    - $0.015 per vCPU-hour (~$11/month for 1 vCPU proxy)
+    - $0.0000027 per connection per hour (~$2/month for 100 connections)
+    - **Total:** ~$13/month for peace of mind
+
+    **When you can skip RDS Proxy:**
+    - You have a fixed, small number of tasks (e.g., always exactly 2 tasks)
+    - You're NOT using auto-scaling
+    - Your max possible connections are well below RDS limit
+      - Example: `max_tasks = 5`, `pool_size = 10`, `total = 50` << `RDS max_connections = 150`
+
+  - **Calculate max pool size:** `RDS max_connections / expected max tasks` (leave headroom)
+  - **Configure connection pool in application:**
     - **Node.js/Knex**: `pool: { min: 2, max: 10 }`
     - **Python/SQLAlchemy**: `pool_size=5, max_overflow=10`
     - **Java/HikariCP**: `maximumPoolSize=10`
   - Enable connection validation/keep-alive to handle RDS failovers
   - Implement retry logic for transient connection errors
-  - Consider using RDS Proxy for connection pooling at the infrastructure level
 
 - **Acceptance Criteria:**
+  - ✅ **RDS Proxy provisioned and tested, OR justification documented for not using it**
   - ✅ Scaling from 1 to 10 tasks doesn't cause "too many connections" errors
   - ✅ RDS failover doesn't crash the application (reconnects automatically)
   - ✅ Connections are released on container shutdown
   - ✅ Database connection count visible in RDS CloudWatch metrics
+  - ✅ **Load test at 2× expected max scale shows stable connection count**
 
 ---
 
@@ -674,233 +1308,3 @@ Before deploying to Fargate, verify each item:
 - [ ] Timezone handling verified
 - [ ] Container runs as non-root user
 - [ ] Secrets externalized to Secrets Manager/SSM
-
----
-
-## Appendix A: Secrets Security — EC2 vs ECS Comparison
-
-This appendix explains **how secrets are stored and injected** in both environments, and why ECS + Secrets Manager is a security improvement.
-
-### The Security Question
-
-When your app reads `process.env.DB_PASSWORD`, the question isn't just "does it work?" — it's:
-
-1. **Where is the secret stored at rest?** (On disk? Encrypted? Where?)
-2. **Who can access the secret?** (Anyone with SSH? IAM-controlled?)
-3. **Is there an audit trail?** (Who accessed what, when?)
-4. **Can the secret be rotated?** (Without downtime?)
-
-### EC2: Current State (Typical Patterns)
-
-#### Pattern 1: `.env` File + dotenv Library
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ EC2 Instance                                                    │
-│  ┌──────────────────┐      ┌──────────────────────────────────┐ │
-│  │  .env file       │ ───▶ │  App (dotenv loads at startup)   │ │
-│  │  DB_PASS=secret  │      │  process.env.DB_PASS = "secret"  │ │
-│  │  (plaintext)     │      │                                  │ │
-│  └──────────────────┘      └──────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-**Security Concerns:**
-
-- ⚠️ Secret stored in **plaintext file on disk**
-- ⚠️ Anyone with SSH access can `cat .env` and see all secrets
-- ⚠️ If `.env` ends up in a backup, secrets are exposed
-- ⚠️ No audit trail — you don't know who read the file
-- ⚠️ Rotation requires editing the file and restarting the app
-
-#### Pattern 2: Shell Export (Startup Script / PM2 / systemd)
-
-```
-┌───────────────────────────────────────────────────────────────────────┐
-│ EC2 Instance                                                          │
-│  ┌────────────────────────┐      ┌──────────────────────────────────┐ │
-│  │  startup.sh            │      │  App                             │ │
-│  │  export DB_PASS=secret │ ───▶ │  process.env.DB_PASS = "secret"  │ │
-│  │  node app.js           │      │                                  │ │
-│  └────────────────────────┘      └──────────────────────────────────┘ │
-│                                                                       │
-│  OR: PM2 ecosystem.config.js / systemd unit file                      │
-└───────────────────────────────────────────────────────────────────────┘
-```
-
-**Security Concerns:**
-
-- ⚠️ Secret still in **plaintext** (in script, PM2 config, or systemd unit)
-- ⚠️ Anyone with SSH can read the startup script or `ps aux` might show it
-- ⚠️ `/proc/<pid>/environ` exposes all env vars to anyone who can read it
-- ⚠️ No audit trail
-- ⚠️ Rotation requires editing config and restarting
-
-**Slight improvement over `.env`:** Secret isn't in the application directory, so less likely to be accidentally committed or deployed.
-
-#### Pattern 3: EC2 Parameter Store / Secrets Manager (Rare but Better)
-
-Some EC2 setups fetch secrets at startup:
-
-```bash
-# startup.sh
-export DB_PASS=$(aws secretsmanager get-secret-value --secret-id prod/db --query SecretString --output text)
-node app.js
-```
-
-**Better, but:**
-
-- ⚠️ Still ends up as plaintext env var on the instance
-- ⚠️ `/proc/<pid>/environ` still exposes it
-- ✅ At least the secret isn't in a file on disk
-- ✅ IAM controls who can fetch (but anyone on the instance can read after fetch)
-
----
-
-### ECS + Secrets Manager: The Target State
-
-```
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│                                                                                  │
-│  ┌─────────────────────┐      ┌─────────────────┐      ┌────────────────────┐   │
-│  │  Secrets Manager    │      │  ECS Service    │      │  Fargate Task      │   │
-│  │                     │      │                 │      │                    │   │
-│  │  production/auth/db │ ───▶ │  Task Def       │ ───▶ │  Container         │   │
-│  │  (encrypted by KMS) │      │  secrets block  │      │  process.env.DB_*  │   │
-│  │                     │      │                 │      │                    │   │
-│  └─────────────────────┘      └─────────────────┘      └────────────────────┘   │
-│                                                                                  │
-│  IAM: Task Execution Role                                                        │
-│       - secretsmanager:GetSecretValue                                            │
-│       - Resource: arn:aws:secretsmanager:...:production/auth/*                   │
-│                                                                                  │
-└──────────────────────────────────────────────────────────────────────────────────┘
-```
-
-**How It Works:**
-
-1. Secrets stored in **AWS Secrets Manager** (encrypted at rest with KMS)
-2. ECS Task Definition references the secret ARN:
-   ```json
-   "secrets": [
-     {
-       "name": "DB_PASSWORD",
-       "valueFrom": "arn:aws:secretsmanager:us-east-1:123456789:secret:production/auth/db:password::"
-     }
-   ]
-   ```
-3. At container start, **ECS fetches the secret** (not your app) using the Task Execution Role
-4. ECS injects the value as an environment variable
-5. Your app reads `process.env.DB_PASSWORD` — it doesn't know about Secrets Manager
-
-**Security Improvements:**
-
-| Concern             | EC2 (.env / export)          | ECS + Secrets Manager                      |
-| ------------------- | ---------------------------- | ------------------------------------------ |
-| **Storage at rest** | Plaintext file on disk       | Encrypted with KMS                         |
-| **Access control**  | Anyone with SSH              | IAM policies (least privilege)             |
-| **Audit trail**     | None                         | CloudTrail logs every access               |
-| **Rotation**        | Manual edit + restart        | Automatic rotation available               |
-| **Exposure risk**   | In backups, logs, ps output  | Never written to disk                      |
-| **Blast radius**    | Compromise EC2 = all secrets | Compromise task = only that task's secrets |
-
----
-
-### What About `/proc/<pid>/environ`?
-
-You might ask: "Doesn't ECS still inject secrets as env vars? Can't someone read `/proc`?"
-
-**In Fargate:**
-
-- There's no SSH access to the underlying host
-- You can't `exec` into a container unless you explicitly enable ECS Exec
-- Even with ECS Exec, IAM controls who can do it (and it's logged)
-- The attack surface is dramatically smaller
-
-**Contrast with EC2:**
-
-- Anyone with SSH can read any process's environment
-- Often multiple people/services share the same EC2 instance
-- Less granular access control
-
----
-
-### App Code: Identical in Both Environments
-
-This is the key point — **your application code doesn't change:**
-
-```javascript
-// This works identically on EC2 and ECS
-const dbPassword = process.env.DB_PASSWORD;
-
-if (!dbPassword) {
-  throw new Error("DB_PASSWORD environment variable is required");
-}
-```
-
-What changes is **how the secret gets there**:
-
-| Environment               | Who sets `process.env.DB_PASSWORD`? |
-| ------------------------- | ----------------------------------- |
-| EC2 + dotenv              | dotenv library reads `.env` file    |
-| EC2 + shell export        | Bash `export` before starting app   |
-| EC2 + PM2                 | PM2 ecosystem config `env` block    |
-| **ECS + Secrets Manager** | **ECS injects at container start**  |
-
----
-
-### Removing dotenv for Production
-
-If your app currently uses dotenv, you have two options:
-
-**Option A: Make dotenv Optional (Recommended)**
-
-```javascript
-// Only load .env if it exists (for local development)
-require("dotenv").config({ silent: true });
-// Or in newer versions:
-require("dotenv").config(); // Doesn't throw if file missing
-
-// App code works the same either way
-const dbHost = process.env.DB_HOST;
-```
-
-**Option B: Remove dotenv Entirely**
-
-```javascript
-// Just read from process.env directly
-const dbHost = process.env.DB_HOST;
-```
-
-For local development without dotenv, you can:
-
-- Use `export` in your shell before running the app
-- Use a `docker-compose.yml` with `environment:` block
-- Use VS Code's `launch.json` with `"env"` configuration
-
----
-
-### Security Best Practices Summary
-
-1. **Never commit secrets to git** — use `.env.example` with placeholder values
-2. **Never bake secrets into Docker images** — check with `docker history <image>`
-3. **Use Secrets Manager** (not SSM Parameter Store) for truly sensitive values
-   - SSM Parameter Store SecureString works but has lower API limits
-4. **Scope IAM permissions** — each app should only access its own secrets
-5. **Enable CloudTrail** — audit who accessed which secrets
-6. **Consider rotation** — especially for database credentials
-7. **Use VPC Endpoints** — so secrets never traverse the public internet
-
----
-
-### Migration Path
-
-| Phase          | Action                                                         | Owner         |
-| -------------- | -------------------------------------------------------------- | ------------- |
-| Phase 0        | Inventory all secrets (Story 5.1)                              | Dev team      |
-| Phase 1        | Ensure app reads from `process.env`, not hardcoded (Story 2.1) | Dev team      |
-| Phase 1        | Make dotenv optional or remove it                              | Dev team      |
-| Phase 2        | Create secrets in Secrets Manager (Story 4.1)                  | Infra team    |
-| Phase 3        | Reference secrets in Task Definition                           | Infra team    |
-| Post-migration | Delete `.env` files from EC2 instances                         | Infra team    |
-| Post-migration | Consider enabling secret rotation                              | Security team |

@@ -92,6 +92,7 @@ This phase deploys the first application to Fargate. The pattern established her
     - `test-api-2` doesn't need database → attach only `fargate-baseline-sg`
 
   - **Create Service-Specific Database SG (if service needs DB):**
+
     ```bash
     aws ec2 create-security-group \
       --group-name auth-api-database-sg \
@@ -100,6 +101,7 @@ This phase deploys the first application to Fargate. The pattern established her
     ```
 
     - **No inbound/outbound rules needed** - this SG is just a "marker" referenced by RDS SG
+
   - **Update RDS Security Group:**
 
     Add inbound rule to RDS SG:
@@ -321,6 +323,9 @@ This phase deploys the first application to Fargate. The pattern established her
           "awslogs-region": "us-east-1",
           "awslogs-stream-prefix": "ecs"
         }
+      },
+      "linuxParameters": {
+        "initProcessEnabled": true
       },
       "healthCheck": {
         "command": [
@@ -544,8 +549,13 @@ This phase deploys the first application to Fargate. The pattern established her
     - Type: Rolling update
     - Minimum healthy percent: 100 (no downtime)
     - Maximum percent: 200 (allows 2x tasks during deploy)
-    - Deployment circuit breaker: **Enable** with rollback
-      - Why: Automatically rolls back if deployment fails
+    - **⚠️ Deployment circuit breaker: DISABLE for first deployment, then enable afterward**
+      - **Why disable initially?** On first deployment with 0 running tasks, there's no "healthy" baseline
+      - Circuit breaker can trigger false positives during initial spin-up
+      - **Two-phase approach:**
+        1. **Phase 1 (Initial Deployment):** Create service with circuit breaker **disabled**
+        2. **Phase 2 (After first deployment succeeds):** Update service to **enable** circuit breaker with rollback
+      - **After enabling:** Automatically rolls back if deployment fails
       - Prevents stuck deployments that would otherwise require manual intervention
   - **Network Configuration:**
     - VPC: Fargate VPC
@@ -1054,6 +1064,12 @@ This phase deploys the first application to Fargate. The pattern established her
     ```
 
   - **Critical Notes:**
+    - **⚠️ Bootstrap Dependency:** This workflow assumes the ECS service already exists (created in Story 4.1)
+      - **First-run problem:** You can't use this workflow to create the service for the first time
+      - **Manual first deployment required:**
+        1. Create service manually via Console/CLI (Story 4.1)
+        2. Once service exists, this workflow can update it
+      - **See Phase 4, Story 1.1** for bootstrap solution using reusable workflows
     - **Reusability:** This workflow is fully reusable. To use it for a different project:
       1. Copy the entire file to the new repo
       2. Update ONLY the `env` block at the top with your project's values

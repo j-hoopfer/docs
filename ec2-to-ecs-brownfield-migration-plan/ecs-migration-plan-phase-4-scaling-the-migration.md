@@ -121,13 +121,38 @@ Phase 3 established the pattern for deploying ONE application. Now you need to r
               container-name: ${{ inputs.container_name }}
               image: ${{ steps.build-image.outputs.image }}
 
-          - name: Deploy to ECS
+          - name: Check if ECS service exists
+            id: check-service
+            run: |
+              # Attempt to describe the service to see if it exists
+              if aws ecs describe-services \
+                --cluster ${{ inputs.cluster_name }} \
+                --services ${{ inputs.service_name }} \
+                --query 'services[0].status' --output text | grep -q ACTIVE; then
+                echo "exists=true" >> $GITHUB_OUTPUT
+              else
+                echo "exists=false" >> $GITHUB_OUTPUT
+              fi
+
+          - name: Deploy to ECS (Update Existing Service)
+            if: steps.check-service.outputs.exists == 'true'
             uses: aws-actions/amazon-ecs-deploy-task-definition@v2
             with:
               task-definition: ${{ steps.task-def.outputs.task-definition }}
               service: ${{ inputs.service_name }}
               cluster: ${{ inputs.cluster_name }}
               wait-for-service-stability: true
+
+          - name: Create ECS Service (First Run)
+            if: steps.check-service.outputs.exists == 'false'
+            run: |
+              # This handles the bootstrap case where service doesn't exist yet
+              # You'll need to provide additional inputs for service creation:
+              # - subnets, security groups, target group ARN, etc.
+              # For now, this is a placeholder - manual first deployment still recommended
+              echo "⚠️ Service does not exist. Create it manually first (see Phase 3, Story 4.1)"
+              echo "Once created, subsequent pushes will update automatically."
+              exit 1
     ```
 
   - **Key Features:**
@@ -366,14 +391,20 @@ Phase 3 established the pattern for deploying ONE application. Now you need to r
                    "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
                  },
                  "StringLike": {
-                   "token.actions.githubusercontent.com:sub": "repo:my-org/auth-api:*"
+                   "token.actions.githubusercontent.com:sub": "repo:my-org/auth-api:ref:refs/heads/main"
                  }
                }
              }
            ]
          }
          ```
-       - **Key Change:** `repo:my-org/auth-api:*` instead of `repo:my-org/*:*`
+       - **Key Changes:**
+         1. `repo:my-org/auth-api:ref:refs/heads/main` instead of `repo:my-org/auth-api:*` (restricts to main branch only)
+         2. Specific repo (not `repo:my-org/*:*`)
+       - **Why restrict to main branch?**
+         - Prevents feature branches from deploying to production
+         - Developer can't deploy from their fork
+         - Must go through pull request → merge → main → deploy workflow
     2. **Create Scoped Permissions Policy:**
 
        ```json
@@ -515,6 +546,48 @@ Phase 3 established the pattern for deploying ONE application. Now you need to r
     ```
 
   - **Shared Infrastructure (infrastructure/shared/outputs.tf):**
+
+    **⚠️ Important: Configure DynamoDB State Locking**
+
+    Before applying any Terraform, configure state locking to prevent concurrent modifications:
+
+    ```hcl
+    # infrastructure/shared/main.tf
+    terraform {
+      required_version = ">= 1.0"
+
+      backend "s3" {
+        bucket         = "my-company-terraform-state"
+        key            = "ecs-migration/shared/terraform.tfstate"
+        region         = "us-east-1"
+        encrypt        = true
+        dynamodb_table = "terraform-state-lock"  # Critical for preventing corruption
+      }
+
+      required_providers {
+        aws = {
+          source  = "hashicorp/aws"
+          version = "~> 5.0"
+        }
+      }
+    }
+    ```
+
+    **Create DynamoDB lock table (one-time setup):**
+
+    ```bash
+    aws dynamodb create-table \
+      --table-name terraform-state-lock \
+      --attribute-definitions AttributeName=LockID,AttributeType=S \
+      --key-schema AttributeName=LockID,KeyType=HASH \
+      --billing-mode PAY_PER_REQUEST \
+      --region us-east-1
+    ```
+
+    **Why this matters:**
+    - Without locking: Two people run `terraform apply` → state corruption
+    - With DynamoDB locking: Second person waits or gets blocked
+    - DynamoDB cost: ~$0.25/month (essentially free)
 
     ```hcl
     # These outputs are used by service modules
@@ -1367,6 +1440,7 @@ Phase 3 established the pattern for deploying ONE application. Now you need to r
     Target value: 70%
     Scale-out cooldown: 60 seconds
     Scale-in cooldown: 300 seconds
+    Datapoints to alarm: 3 out of 3 (3-minute evaluation window)
     ```
 
   - **Why These Settings:**
@@ -1374,6 +1448,10 @@ Phase 3 established the pattern for deploying ONE application. Now you need to r
     - Target 70% CPU: Room for traffic spikes before scaling
     - Scale-out 60s: React quickly to load
     - Scale-in 300s: Avoid thrashing (wait before removing capacity)
+    - **3-minute evaluation (3 datapoints):** Prevents scaling on JVM garbage collection spikes
+      - **Problem:** JVM GC can cause 30-second CPU spike → triggers scale-out → wastes money
+      - **Solution:** Require 3 consecutive high readings (3 minutes) before scaling
+      - Applies to Node.js, Python, Ruby (any runtime with GC)
   - **Alternative Metrics:**
     - `ECSServiceAverageMemoryUtilization` — For memory-bound apps
     - `ALBRequestCountPerTarget` — For request-based scaling

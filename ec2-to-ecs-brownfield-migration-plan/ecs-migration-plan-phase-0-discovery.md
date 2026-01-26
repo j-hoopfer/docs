@@ -57,6 +57,12 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
   - Evaluate cost/benefit of VPC Endpoints vs NAT Gateway
   - Document decision for implementation phase
 - **Implementation Details:**
+  - **Critical: S3 Gateway Endpoint is FREE and prevents massive NAT costs:**
+    - ECR Docker image layers are stored in S3
+    - Without S3 Gateway Endpoint, image pulls route through NAT Gateway
+    - Large images pulling through NAT can cost $10-50+/month per service
+    - S3 Gateway Endpoint has **zero** endpoint cost and **zero** data processing cost
+    - **Always create S3 Gateway Endpoint, even if you choose NAT Gateway for other traffic**
   - **Required for Fargate without NAT:**
     - `com.amazonaws.<region>.ecr.api` (ECR API calls)
     - `com.amazonaws.<region>.ecr.dkr` (Docker image pulls)
@@ -136,6 +142,7 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
   - Document inbound/outbound rules for each
   - Determine if existing SGs can be reused for Fargate tasks
   - Plan security group strategy for migration
+  - Verify security groups allow self-referencing traffic (task-to-task communication)
 
 - **Implementation Details:**
   - **For each application, document:**
@@ -170,6 +177,20 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
     - Name: `[app-name]-fargate-sg` (e.g., `auth-api-fargate-sg`)
     - Update database/cache SGs to allow the NEW Fargate SG
     - Keep EC2 SG intact until migration complete
+  
+  - **Self-referencing rules (critical for service-to-service communication):**
+    - Tasks in the same ECS service may need to communicate (e.g., clustering, leader election)
+    - Security group must allow inbound traffic from itself
+    - **Example rule:**
+      ```bash
+      # Allow all traffic from the same security group
+      aws ec2 authorize-security-group-ingress \
+        --group-id sg-app \
+        --source-group sg-app \
+        --protocol -1 \
+        --port -1
+      ```
+    - Without this, tasks cannot reach each other even though they're in the same service
 
 - **Acceptance Criteria:**
   - ✅ All application EC2 security groups documented
@@ -337,6 +358,7 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
   - Check ECS service/cluster limits
   - Check ALB limits if creating new load balancers
   - Request increases if needed (can take days)
+  - Check AWS API rate limits (not just resource quotas)
 
 - **Implementation Details:**
   - Key quotas to check:
@@ -348,6 +370,25 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
   - Check via: AWS Console → Service Quotas → Amazon ECS
   - Or: `aws service-quotas list-service-quotas --service-code ecs`
   - Request increase: Console or `aws service-quotas request-service-quota-increase`
+  
+  - **Check API rate limits in addition to resource quotas:**
+    - AWS APIs have **rate limits** (requests per second) in addition to resource quotas
+    - Common bottlenecks during deployment:
+      - `ecs:DescribeServices` - 40 requests/second
+      - `ecs:UpdateService` - 20 requests/second
+      - `ecr:GetAuthorizationToken` - 20 requests/second (shared across account)
+    - **Risk:** CI/CD deploying 10 services simultaneously can hit rate limits
+    - **Mitigation:**
+      - Serialize deployments in CI/CD (deploy one service at a time)
+      - Use exponential backoff in deployment scripts
+      - Request rate limit increase for high-throughput accounts
+    - **Check current limits:**
+      ```bash
+      # Use Service Quotas console or CLI
+      aws service-quotas list-service-quotas \
+        --service-code ecs \
+        --query 'Quotas[?QuotaName contains `Rate`]'
+      ```
 
 - **Acceptance Criteria:**
   - ✅ Current quota usage documented
@@ -398,6 +439,122 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 
 ---
 
+### Story 8.2: Audit EC2 Reserved Instances and Savings Plans
+
+- **Title:** Identify Active EC2 Financial Commitments
+- **Persona:** As a **finance/cloud admin**, I need to audit existing EC2 Reserved Instances and Savings Plans so that I can avoid paying double (for both unused EC2 commitments and new Fargate usage) during migration.
+
+- **Requirements:**
+  - Identify all active EC2 Reserved Instances (RIs)
+  - Identify all active EC2 Instance Savings Plans
+  - Calculate financial impact of migrating before commitments expire
+  - Plan migration timing or mitigation strategies
+
+- **Implementation Details:**
+  - **The Problem:**
+    - EC2 Reserved Instances and EC2 Instance Savings Plans do **NOT** apply to Fargate
+    - Compute Savings Plans can apply to Fargate, but EC2-specific commitments cannot
+    - If you migrate while still paying for unused RIs, you'll pay double:
+      - **Wasted:** Unused EC2 RI commitment ($X/month)
+      - **New:** Fargate on-demand usage ($Y/month)
+      - **Total waste:** Migration delay or breakage fees
+  - **Audit active commitments:**
+
+    **Check Reserved Instances:**
+
+    ```bash
+    aws ec2 describe-reserved-instances \
+      --filters "Name=state,Values=active" \
+      --query 'ReservedInstances[*].[ReservedInstancesId,InstanceType,InstanceCount,End,OfferingType]' \
+      --output table
+    ```
+
+    **Check Savings Plans:**
+
+    ```bash
+    aws savingsplans describe-savings-plans \
+      --filters "Name=state,Values=active" \
+      --query 'savingsPlans[*].[savingsPlanId,savingsPlanType,commitment,end]' \
+      --output table
+    ```
+
+    Or use AWS Cost Management Console:
+    - Go to **AWS Cost Management** > **Savings Plans** or **Reserved Instances**
+    - Filter by: **Active** status
+    - Note: Instance type, commitment amount, expiration date
+
+  - **Calculate financial impact:**
+
+    | Scenario                                    | Financial Impact                                                                            |
+    | ------------------------------------------- | ------------------------------------------------------------------------------------------- |
+    | **RI expires before migration**             | ✅ Zero waste - proceed with migration                                                      |
+    | **RI expires 1-3 months after migration**   | ⚠️ Minor waste - acceptable if migration value justifies it                                 |
+    | **RI expires 6-12 months after migration**  | 🔴 Major waste - consider delaying migration or selling RI on Reserved Instance Marketplace |
+    | **Compute Savings Plan (not EC2-specific)** | ✅ Commitment applies to Fargate - no issue                                                 |
+
+  - **Mitigation strategies:**
+    1. **Wait for expiration** (if timeline allows)
+       - Delay Fargate migration until RIs expire
+       - Pros: Zero wasted commitment
+       - Cons: Delayed business value from migration
+    2. **Sell on Reserved Instance Marketplace** (Standard RIs only)
+       - List unused RIs for sale to other AWS customers
+       - Recovery rate: typically 20-40% of remaining value
+       - Requirements: US bank account, must be Standard RI (not Convertible)
+       - [AWS RI Marketplace docs](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ri-market-general.html)
+    3. **Convert EC2 RI to Convertible RI** (if possible)
+       - Exchange for different instance types that you still use
+       - Not applicable if you're shutting down all EC2
+    4. **Modify RI to smaller instance size**
+       - If migrating only some apps, modify RI to cover remaining EC2 workload
+       - [Modifying RIs docs](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ri-modifying.html)
+    5. **Accept the waste** (if business case is strong)
+       - Calculate NPV of migration benefits vs. wasted RI cost
+       - Example: If Fargate saves $500/month in ops cost but wastes $200/month in RI for 6 months, total savings = $500×6 - $200×6 = $1800
+    6. **Hybrid approach** (recommended for large fleets)
+       - Migrate apps NOT covered by RIs first
+       - Keep EC2 apps that match RI instance types running until expiration
+       - Gradually shift remaining apps as RIs expire
+
+  - **Check commitment type:**
+
+    | Commitment Type               | Applies to Fargate? | Action           |
+    | ----------------------------- | ------------------- | ---------------- |
+    | **EC2 Reserved Instance**     | ❌ No               | Plan mitigation  |
+    | **EC2 Instance Savings Plan** | ❌ No               | Plan mitigation  |
+    | **Compute Savings Plan**      | ✅ Yes              | No action needed |
+
+  - **Example financial calculation:**
+
+    ```
+    Current state:
+    - 10× t3.medium EC2 instances
+    - 3-year Standard RI (1 year remaining)
+    - RI commitment: $15/month each = $150/month total
+    - On-demand cost would be: $30/month each = $300/month total
+    - Savings from RI: $150/month
+
+    Migration scenario:
+    - Fargate cost (same workload): $210/month
+    - Wasted RI cost (unused): $150/month
+    - **Total cost during overlap: $360/month** (vs. $150/month today)
+    - **Extra cost for 12 months: $210/month × 12 = $2,520**
+
+    Decision:
+    - If migration saves $300/month in ops cost, ROI = 8.4 months
+    - If can't wait 12 months, proceed but budget for overlap cost
+    ```
+
+- **Acceptance Criteria:**
+  - ✅ All active RIs and Savings Plans identified with expiration dates
+  - ✅ Financial impact calculated for each commitment
+  - ✅ Mitigation strategy selected and documented
+  - ✅ Migration timeline adjusted if necessary to minimize waste
+  - ✅ Finance team informed of potential double-billing period
+  - ✅ Cost anomaly alerts configured to catch unexpected charges
+
+---
+
 ## Feature 9: Existing Infrastructure Inventory
 
 ### Story 9.1: Document Current EC2 Application Architecture
@@ -427,9 +584,31 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
     - What it depends on
     - Whether it needs to be a separate ECS service
 
+  - **Critical for cron jobs: Check for stateful dependencies**
+    - **The Risk:** Cron jobs on EC2 often rely on local file history from previous runs
+    - **Example problematic patterns:**
+      - Script reads `/tmp/last_run_id.txt` to determine what to process next
+      - Incremental backup script checks local state file
+      - ETL job tracks last processed record in local database
+    - **Fargate impact:** Each ECS task starts fresh - no local state persists between runs
+    - **Check for:**
+      ```bash
+      # Search cron scripts for file reads that might be state
+      grep -r "/tmp/" /path/to/cron/scripts
+      grep -r "\.txt\|\.json\|\.db" /path/to/cron/scripts
+      # Look for any file I/O that isn't logging
+      ```
+    - **Migration strategies for stateful cron jobs:**
+      1. **Use S3 for state files:** Store `last_run_id.txt` in S3, read/write on each run
+      2. **Use DynamoDB for state:** Track processing state in DynamoDB table
+      3. **Use RDS/database:** Store "last processed" timestamp in database
+      4. **Make idempotent:** Design job to process full dataset each time (with deduplication)
+
 - **Acceptance Criteria:**
   - ✅ All running services documented
   - ✅ All cron jobs documented with schedules
+  - ✅ **Cron jobs verified as stateless or refactored to use external state (S3/DynamoDB/RDS)**
+  - ✅ **Cron jobs tested to run successfully multiple times without side effects**
   - ✅ All open ports documented
   - ✅ Local data directories identified and migration plan created
 
@@ -477,6 +656,108 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
   - ✅ Log shipping destinations documented (ELK, Splunk, CloudWatch, etc.)
   - ✅ Impact assessment: what breaks if we switch to stdout?
   - ✅ Migration plan for log consumers documented
+
+---
+
+### Story 9.3: Audit Host-Level Agents and APM Tools
+
+- **Title:** Inventory OS-Level Monitoring and Security Agents
+- **Persona:** As a **DevOps engineer**, I need to audit all host-level agents running on EC2 so that I can plan their migration to sidecar containers or AWS-native alternatives, avoiding blind spots in observability and security after moving to Fargate.
+
+- **Requirements:**
+  - Identify all running agents on EC2 instances (APM, monitoring, security)
+  - Determine which agents are compatible with Fargate
+  - Plan migration strategy for each agent (sidecar, AWS native, or discontinue)
+  - Update application architecture to include sidecars where needed
+
+- **Implementation Details:**
+  - **SSH to EC2 and audit running processes:**
+    ```bash
+    ps aux | grep -E 'datadog|newrelic|dynatrace|splunk|crowdstrike|falcon|qualys'
+    systemctl list-units --type=service | grep -E 'datadog|newrelic|dynatrace'
+    dpkg -l | grep -E 'datadog|newrelic'  # Debian/Ubuntu
+    rpm -qa | grep -E 'datadog|newrelic'  # RHEL/Amazon Linux
+    ```
+  
+  - **Common agents and their Fargate strategies:**
+    
+    | Agent Type | EC2 Agent | Fargate Strategy |
+    |------------|-----------|------------------|
+    | **APM** | Datadog Agent | Sidecar container OR Datadog Lambda extension |
+    | | New Relic Infrastructure | Not supported - use New Relic APM library |
+    | | Dynatrace OneAgent | Sidecar container with proper configuration |
+    | **Log Shipping** | Filebeat, Fluentd | **Not needed** - use awslogs driver instead |
+    | | Splunk Forwarder | **Not needed** - ship logs via Firehose or Lambda |
+    | | CloudWatch Agent | **Not needed** - use awslogs driver |
+    | **Security** | CrowdStrike Falcon | **Not supported on Fargate** - use AWS GuardDuty + Inspector |
+    | | Qualys, Tenable | **Not supported** - scan container images in ECR instead |
+    | **Service Mesh** | Consul Agent | Not recommended - use AWS App Mesh or Service Connect |
+  
+  - **Decision tree for each agent:**
+    1. **Is there an AWS-native alternative?**
+       - **Monitoring:** CloudWatch Container Insights (built-in)
+       - **Logs:** CloudWatch Logs (awslogs driver)
+       - **Security:** GuardDuty, Inspector, Security Hub
+       - → **Preferred:** Use AWS native tools
+    
+    2. **Does the vendor support Fargate sidecar?**
+       - **Datadog:** Yes ([docs](https://docs.datadoghq.com/integrations/ecs_fargate/))
+       - **New Relic:** Yes, via sidecar
+       - **Dynatrace:** Yes ([docs](https://www.dynatrace.com/support/help/setup-and-configuration/setup-on-container-platforms/amazon-web-services/amazon-ecs/deploy-oneagent-as-ecs-fargate-sidecar))
+       - → **Acceptable:** Deploy as sidecar container
+    
+    3. **Can we instrument the app instead of using a host agent?**
+       - **APM:** Use application-level SDK (Datadog Tracer, New Relic APM library, X-Ray SDK)
+       - → **Good:** Less infrastructure overhead
+    
+    4. **Is this agent still needed?**
+       - Legacy agents from previous vendors
+       - Duplicate monitoring (e.g., both Datadog and CloudWatch)
+       - → **Best:** Simplify and consolidate
+  
+  - **Sidecar container example (Datadog):**
+    ```json
+    {
+      "containerDefinitions": [
+        {
+          "name": "app",
+          "image": "my-app:latest",
+          "portMappings": [{"containerPort": 3000}],
+          "environment": [
+            {"name": "DD_AGENT_HOST", "value": "localhost"},
+            {"name": "DD_TRACE_AGENT_PORT", "value": "8126"}
+          ]
+        },
+        {
+          "name": "datadog-agent",
+          "image": "public.ecr.aws/datadog/agent:latest",
+          "environment": [
+            {"name": "DD_API_KEY", "valueFrom": "arn:aws:secretsmanager:..."},
+            {"name": "ECS_FARGATE", "value": "true"},
+            {"name": "DD_APM_ENABLED", "value": "true"}
+          ]
+        }
+      ]
+    }
+    ```
+  
+  - **Cost implications:**
+    - Sidecar containers consume additional vCPU/memory (e.g., Datadog agent ~128MB)
+    - Calculate: (Number of tasks) × (Agent memory) × $0.004445/GB/hour
+    - Example: 10 tasks × 128MB × 730 hours = ~$4/month extra
+  
+  - **Migration planning:**
+    - **Phase 0 (Discovery):** Audit and plan (this story)
+    - **Phase 1 (App Readiness):** Update task definitions to include sidecars
+    - **Phase 3 (Deployment):** Deploy with sidecars and verify metrics/logs flow
+
+- **Acceptance Criteria:**
+  - ✅ All host-level agents identified and categorized
+  - ✅ Migration strategy documented for each agent (AWS native, sidecar, discontinue)
+  - ✅ Sidecar container task definitions drafted for required agents
+  - ✅ Cost impact of sidecars calculated
+  - ✅ Team trained on sidecar deployment pattern
+  - ✅ Dashboards and alerts verified to work with new agent architecture
 
 ---
 
