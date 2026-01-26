@@ -1946,3 +1946,41 @@ last_name: db.raw("SPLIT_PART(name, ' ', 2)")
 **Last Updated:** January 25, 2026  
 **Owner:** Platform Engineering Team  
 **Review Cycle:** Quarterly
+
+---
+
+### Story 1.2: Plan VPC Endpoints (Optional Cost Optimization)
+
+- **Title:** Evaluate VPC Endpoints to Reduce NAT Gateway Costs
+- **Persona:** As a **cloud architect**, I need to understand VPC Endpoint options so that I can reduce data transfer costs and avoid NAT Gateway dependency for AWS service traffic.
+
+- **Requirements:**
+  - Identify AWS services the application will call
+  - Evaluate cost/benefit of VPC Endpoints vs NAT Gateway
+  - Document decision for implementation phase
+- **Implementation Details:**
+  - **Critical: S3 Gateway Endpoint is FREE and prevents massive NAT costs:**
+    - ECR Docker image layers are stored in S3
+    - Without S3 Gateway Endpoint, image pulls route through NAT Gateway
+    - Large images pulling through NAT can cost $10-50+/month per service
+    - S3 Gateway Endpoint has **zero** endpoint cost and **zero** data processing cost
+    - **Always create S3 Gateway Endpoint, even if you choose NAT Gateway for other traffic**
+  - **Required for Fargate without NAT:**
+    - `com.amazonaws.<region>.ecr.api` (ECR API calls)
+    - `com.amazonaws.<region>.ecr.dkr` (Docker image pulls)
+    - `com.amazonaws.<region>.s3` (ECR stores layers in S3) - Gateway endpoint, free
+    - `com.amazonaws.<region>.logs` (CloudWatch Logs)
+  - **Commonly needed:**
+    - `com.amazonaws.<region>.secretsmanager` (if using Secrets Manager)
+    - `com.amazonaws.<region>.ssm` (if using SSM Parameter Store)
+  - **Cost comparison:**
+    - NAT Gateway: $32/month + $0.045/GB processed
+    - Interface Endpoint: ~$7.30/month per endpoint per AZ + $0.01/GB processed
+    - For low-traffic apps, VPC Endpoints may be cheaper; for high-traffic, NAT may be simpler
+
+- **Acceptance Criteria:**
+  - ✅ List of required AWS services documented
+  - ✅ Cost comparison completed for your expected traffic
+  - ✅ Decision documented: NAT Gateway vs VPC Endpoints vs hybrid approach
+
+---

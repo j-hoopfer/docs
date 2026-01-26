@@ -1251,3 +1251,1664 @@ For local development without dotenv, you can:
 | Phase 3        | Reference secrets in Task Definition                           | Infra team    |
 | Post-migration | Delete `.env` files from EC2 instances                         | Infra team    |
 | Post-migration | Consider enabling secret rotation                              | Security team |
+
+---
+
+## 11. Enterprise Terraform Organization & Repository Structure
+
+### Overview
+
+This section provides comprehensive guidance on organizing Terraform infrastructure for enterprise environments, including team workflows, resource placement, and when to create new projects.
+
+### Layered State Architecture
+
+**The Problem:**
+
+In enterprise environments, putting all infrastructure in a single Terraform state file creates several issues:
+
+- **Blast Radius**: A mistake in one area (e.g., security group) triggers state refresh of everything (VPCs, databases)
+- **Team Bottlenecks**: Network team and app teams can't work independently
+- **Slow Operations**: `terraform plan` takes minutes when state contains hundreds of resources
+- **Risk**: Changing a load balancer shouldn't risk touching VPC peering connections
+
+**The Solution: Layer Separation**
+
+Split infrastructure into logical layers with separate state files:
+
+1. **Network Layer (`00-network`)**: Foundation that rarely changes
+2. **Application Layer (`10-application`)**: Workloads that change frequently
+
+Layers communicate via `terraform_remote_state` data sources.
+
+---
+
+### Layered vs Monolithic: When to Use Which Approach
+
+#### Monolithic Architecture
+
+**Structure:**
+All infrastructure in a single Terraform root module with one state file.
+
+```
+terraform/
+├── main.tf           # Everything: VPC, EC2, RDS, ECS, ALB
+├── variables.tf
+├── outputs.tf
+└── terraform.tfstate # Single state file
+```
+
+**When to Use Monolithic:**
+
+✅ **Good for:**
+
+- **Small projects**: < 20 resources, single application
+- **Proof of concepts**: Testing ideas quickly
+- **Personal projects**: No team collaboration needed
+- **Single-team ownership**: One team owns everything
+- **Tightly coupled resources**: Everything depends on everything
+- **Learning Terraform**: Simpler mental model for beginners
+- **Ephemeral environments**: Dev sandboxes that get destroyed daily
+
+✅ **Example Scenarios:**
+
+- Side project blog running on single EC2 + RDS
+- Hackathon demo environment
+- Personal learning lab
+- Single landing page with CloudFront + S3
+- Startup MVP with 2-3 engineers
+
+**Advantages:**
+
+- ✅ Simple: One `terraform apply` deploys everything
+- ✅ No remote state data sources needed
+- ✅ Easier to understand for beginners
+- ✅ Fewer files to manage
+- ✅ Fast iteration for small projects
+
+**Disadvantages:**
+
+- ❌ Blast radius: Any change refreshes entire state
+- ❌ Slow: `terraform plan` takes longer as resources grow
+- ❌ Team conflicts: Multiple engineers cause state locking
+- ❌ Risk: Changing ALB rule refreshes VPC peering state
+- ❌ Cannot parallelize: Single state = single operation at a time
+- ❌ Hard to delegate: No separation of concerns
+
+---
+
+#### Layered Architecture
+
+**Structure:**
+Infrastructure split into logical layers with separate state files.
+
+```
+terraform/environments/dev/
+├── 00-network/           # Network layer
+│   ├── main.tf
+│   └── terraform.tfstate
+└── 10-application/       # Application layer
+    ├── main.tf
+    ├── data.tf           # References 00-network
+    └── terraform.tfstate
+```
+
+**When to Use Layered:**
+
+✅ **Good for:**
+
+- **Multiple teams**: Platform team + App teams
+- **Large infrastructure**: 50+ resources
+- **Brownfield migrations**: Importing existing infrastructure
+- **Production workloads**: Minimize blast radius
+- **Frequent changes**: App deploys shouldn't touch network
+- **Enterprise environments**: Compliance, audit trails
+- **Microservices**: Multiple services, shared infrastructure
+- **Long-lived infrastructure**: Resources with different lifecycles
+
+✅ **Example Scenarios:**
+
+- EC2 to Fargate migration (this project)
+- Multi-tenant SaaS platform
+- E-commerce platform with 10+ microservices
+- Enterprise with separate network/security/app teams
+- Financial services with compliance requirements
+
+**Advantages:**
+
+- ✅ Reduced blast radius: Network changes isolated from apps
+- ✅ Team autonomy: App team deploys without touching network
+- ✅ Faster operations: `terraform plan` only checks relevant layer
+- ✅ Parallel work: Network and app teams work simultaneously
+- ✅ Clear ownership: Different teams own different layers
+- ✅ Safer refactoring: Can rebuild app layer without network
+- ✅ Better for CI/CD: Deploy layers independently
+
+**Disadvantages:**
+
+- ❌ More complex: Need to understand `terraform_remote_state`
+- ❌ More files: Multiple `main.tf` files to navigate
+- ❌ Order dependency: Must deploy 00-network before 10-application
+- ❌ Initial setup overhead: More planning required upfront
+- ❌ Debugging across layers: Harder to trace cross-layer issues
+
+---
+
+#### Decision Matrix
+
+| Factor                      | Monolithic                    | Layered                                  |
+| --------------------------- | ----------------------------- | ---------------------------------------- |
+| **Team size**               | 1-3 engineers                 | 4+ engineers                             |
+| **Resource count**          | < 20 resources                | 50+ resources                            |
+| **Deployment frequency**    | Weekly or less                | Daily or multiple times/day              |
+| **Infrastructure maturity** | New/greenfield                | Mature/brownfield                        |
+| **Change blast radius**     | Acceptable                    | Must minimize                            |
+| **Team structure**          | Single team                   | Multiple teams (platform, app, security) |
+| **Compliance requirements** | Minimal                       | SOC2, HIPAA, PCI-DSS                     |
+| **Lifecycle variance**      | All resources change together | Network stable, apps change often        |
+| **CI/CD maturity**          | Manual or basic               | Advanced pipelines, GitOps               |
+| **Budget for complexity**   | Low                           | High                                     |
+
+---
+
+#### Hybrid Approach (Start Simple, Grow Complex)
+
+**Recommendation for most teams:**
+
+**Phase 1 (Months 1-3): Monolithic**
+
+- Start with single state file
+- Get comfortable with Terraform
+- Understand resource dependencies
+- Ship features quickly
+
+**Phase 2 (Months 4-6): Two Layers**
+
+- Split when team grows or resource count > 30
+- Separate network from application
+- Introduce `terraform_remote_state`
+
+**Phase 3 (Months 7+): Multiple Layers**
+
+- Add layers as complexity demands:
+  - `00-network`
+  - `10-data` (RDS, ElastiCache - if very stable)
+  - `20-application` (ECS, EC2)
+  - `30-monitoring` (CloudWatch, Datadog)
+
+**Trigger Points to Split:**
+
+- `terraform plan` takes > 30 seconds
+- State locking conflicts happen weekly
+- Team asks "why does my app deploy refresh the VPC?"
+- More than 50 resources in state
+- Multiple teams need to work simultaneously
+
+---
+
+#### Real-World Example: When We Chose Layered
+
+**Scenario:**
+Migrating 5 legacy monolithic applications from EC2 to Fargate. Existing VPC with 2 AZs, RDS Postgres, ElastiCache Redis.
+
+**Why Monolithic Would Fail:**
+
+1. **Import complexity**: Importing VPC + EC2 + RDS into single state = 80+ resources
+2. **Blast radius**: Adding Fargate service would refresh state of production RDS
+3. **Team conflict**: Network team manages VPC, app team deploys services
+4. **Change velocity**: App deploys 3x/day, network changes monthly
+5. **Risk**: `terraform apply` failure could affect production database state
+
+**Why Layered Works:**
+
+1. **Import isolation**: Import VPC into `00-network` (stable, 30 resources)
+2. **Safe app iteration**: Deploy Fargate to `10-application` without touching network
+3. **Team boundaries**: Network team owns layer 0, app team owns layer 1
+4. **Fast deploys**: App layer `terraform plan` takes 5 seconds vs 60 seconds
+5. **Safe rollbacks**: Can destroy/recreate app layer without VPC risk
+
+**Architecture:**
+
+```
+00-network/       # Import once, rarely touch (VPC, subnets, NAT)
+10-application/   # Frequent changes (ECS, ALB, target groups, RDS app schema)
+```
+
+**Result:**
+
+- Network team approves layer 0 changes (1x/month)
+- App team self-serves layer 1 changes (3x/day)
+- Zero state conflicts
+- App deploys don't risk network stability
+
+---
+
+#### Migration Path: Monolithic → Layered
+
+**If you already have monolithic Terraform:**
+
+**Option 1: Big Bang (Not Recommended)**
+
+- Stop all Terraform changes
+- Split state files using `terraform state mv`
+- High risk, requires downtime
+
+**Option 2: Gradual Migration (Recommended)**
+
+1. **Freeze monolith**: No new resources in old state
+2. **Create network layer**: Import VPC into new `00-network` state
+3. **Verify parallel**: Both states exist, manage different resources
+4. **Migrate apps**: One service at a time, move to `10-application`
+5. **Deprecate monolith**: After all resources migrated
+
+**Example Commands:**
+
+```bash
+# In old monolithic state
+terraform state list
+
+# Move VPC to new network layer
+terraform state mv aws_vpc.main ../00-network/aws_vpc.main
+
+# In new 00-network layer
+terraform import aws_vpc.main vpc-abc123
+terraform plan  # Should show: No changes
+```
+
+**Timeline:**
+
+- Week 1: Create 00-network, import VPC resources
+- Week 2-4: Import application resources to 10-application
+- Week 5: Verify both layers work, deprecate old monolith
+
+---
+
+#### Summary: Quick Decision Guide
+
+**Choose Monolithic if:**
+
+- Team < 3 people
+- Resources < 20
+- Single application
+- Deploying weekly or less
+- Learning Terraform
+
+**Choose Layered if:**
+
+- Team ≥ 4 people
+- Resources ≥ 50
+- Multiple applications/services
+- Deploying daily
+- Brownfield migration (this project)
+- Production workloads
+- Need team separation
+
+**Still unsure?**
+
+- Start monolithic
+- Split when you hit pain (state locking, slow plans, team conflicts)
+- Use this migration as opportunity to adopt layered (we're importing anyway)
+
+---
+
+### Repository Structure for Brownfield Migrations
+
+```
+fargate-migration-infrastructure/
+├── README.md
+├── .gitignore
+├── docs/
+│   └── IMPORT_COMMANDS.md          # Record of all imported resources
+└── terraform/
+    ├── bootstrap/                   # S3 + DynamoDB for state (one-time)
+    ├── modules/                     # Reusable modules
+    │   ├── networking/
+    │   ├── security/
+    │   ├── compute/
+    │   ├── database/
+    │   └── secrets/
+    └── environments/
+        ├── dev/
+        │   ├── 00-network/          # VPCs, subnets, routing
+        │   │   ├── main.tf
+        │   │   ├── outputs.tf
+        │   │   └── variables.tf
+        │   └── 10-application/      # EC2, ECS, RDS, ALB
+        │       ├── main.tf
+        │       ├── outputs.tf
+        │       ├── variables.tf
+        │       └── data.tf          # References 00-network outputs
+        ├── staging/
+        │   ├── 00-network/
+        │   └── 10-application/
+        └── production/
+            ├── 00-network/
+            └── 10-application/
+```
+
+---
+
+### Resource Placement Guide
+
+#### Network Layer (`00-network`)
+
+**What belongs here:**
+
+- VPCs and CIDR blocks
+- Subnets (public and private)
+- Internet Gateways
+- NAT Gateways and Elastic IPs
+- Route Tables and associations
+- VPC Peering Connections
+- Transit Gateways
+- Network ACLs
+- **VPC Endpoints** (S3, ECR, CloudWatch Logs, Secrets Manager, etc.)
+- **Route53 Private Hosted Zones** (for internal DNS)
+- **Route53 Public Hosted Zones** (if managing DNS in this account)
+
+**Who manages:** Infrastructure/Platform team
+
+**Change frequency:** Infrequent (weeks to months)
+
+**Example `00-network/outputs.tf`:**
+
+```hcl
+output "vpc_id" {
+  value = aws_vpc.main.id
+}
+
+output "public_subnet_ids" {
+  value = [
+    aws_subnet.public_1a.id,
+    aws_subnet.public_1b.id,
+  ]
+}
+
+output "private_subnet_ids" {
+  value = [
+    aws_subnet.private_1a.id,
+    aws_subnet.private_1b.id,
+  ]
+}
+
+output "vpc_cidr_block" {
+  value = aws_vpc.main.cidr_block
+}
+```
+
+---
+
+#### Application Layer (`10-application`)
+
+**What belongs here:**
+
+**Compute:**
+
+- EC2 instances
+- ECS clusters
+- ECS services
+- ECS task definitions
+- Auto Scaling Groups
+- Launch Templates
+
+**Load Balancing:**
+
+- Application Load Balancers (ALB)
+- Network Load Balancers (NLB)
+- Target Groups
+- ALB/NLB Listeners
+- Listener Rules
+
+**Persistence:**
+
+- RDS instances
+- RDS subnet groups
+- ElastiCache clusters
+- ElastiCache subnet groups
+- DynamoDB tables
+- S3 buckets (application-specific)
+
+**DNS & Certificates:**
+
+- **ACM Certificates** (tied to specific ALB/domain)
+- **Route53 A Records** (pointing to ALB)
+- **Route53 CNAME Records** (application aliases)
+
+**Security:**
+
+- Security Groups (all types: ALB, ECS, RDS, ElastiCache)
+- IAM Roles (task execution role, task role)
+- IAM Policies
+- IAM Instance Profiles
+
+**Configuration & Secrets:**
+
+- Secrets Manager secrets
+- SSM Parameter Store parameters
+- CloudWatch Log Groups
+- CloudWatch Alarms
+
+**Who manages:** Application teams (with infrastructure team oversight)
+
+**Change frequency:** Frequent (daily deployments)
+
+**Example `10-application/data.tf` (referencing network layer):**
+
+```hcl
+data "terraform_remote_state" "network" {
+  backend = "s3"
+  config = {
+    bucket = "your-terraform-state-bucket"
+    key    = "dev/00-network/terraform.tfstate"
+    region = "us-east-1"
+  }
+}
+
+# Use in resources:
+resource "aws_lb" "app" {
+  subnets = data.terraform_remote_state.network.outputs.public_subnet_ids
+  # ...
+}
+
+resource "aws_ecs_service" "app" {
+  network_configuration {
+    subnets = data.terraform_remote_state.network.outputs.private_subnet_ids
+    # ...
+  }
+}
+```
+
+---
+
+### Team Workflow & Ownership Model
+
+#### Infrastructure Team (Platform/DevOps)
+
+**Responsibilities:**
+
+- Owns `00-network` layer completely
+- Provides stable network foundation for application teams
+- Reviews/approves changes to shared resources in `10-application`
+- Manages Terraform state backends (S3, DynamoDB)
+- Defines reusable Terraform modules
+- Establishes CI/CD pipeline standards
+
+**Workflow:**
+
+1. Provision network layer once
+2. Export outputs for application teams to consume
+3. Only modify network layer for capacity planning or new regions
+4. Act as enabler, not blocker
+
+#### Application Teams
+
+**Responsibilities:**
+
+- Work primarily in `10-application` layer
+- Add new ECS services, task definitions, ALBs
+- Manage application-specific security groups and IAM roles
+- Deploy and scale applications
+- Monitor and troubleshoot applications
+
+**Workflow:**
+
+1. Reference network outputs via `terraform_remote_state`
+2. Add resources to `10-application` via pull requests
+3. Infrastructure team reviews for security/compliance
+4. Deploy via CI/CD after approval
+5. Iterate rapidly without touching network layer
+
+**Autonomy:**
+
+- Can add new ECS services without network team involvement
+- Can modify task definitions, scaling policies
+- Can add/remove target groups and ALB rules
+- **Cannot** modify VPCs, subnets, or network routing
+
+---
+
+### When to Create a New Terraform Project
+
+#### Use Same Project (Add to `10-application`)
+
+✅ **When:**
+
+- Adding another microservice to the same VPC
+- New application in the same AWS account
+- Shared infrastructure (same RDS, same Redis)
+- Same team or related teams
+- Services need to communicate internally
+
+✅ **Benefits:**
+
+- All services can reference same network outputs
+- Consistent security group patterns
+- Shared RDS/ElastiCache resources
+- Single state backend configuration
+- Easier cross-service dependencies
+
+✅ **Example:**
+
+```
+10-application/
+├── auth-service.tf          # Auth API
+├── user-service.tf          # User API
+├── notification-service.tf  # Notifications
+├── alb.tf                   # Shared ALB with multiple target groups
+└── rds.tf                   # Shared database for all services
+```
+
+---
+
+#### Create New Project (Separate Repository)
+
+❌ **When:**
+
+**Organizational Boundaries:**
+
+- Different business unit or product line
+- Completely separate team with different ownership
+- Different AWS Organization or root account
+- Different compliance requirements (PCI vs non-PCI)
+
+**Infrastructure Isolation:**
+
+- Shared platform services (central logging, monitoring)
+- Multi-tenant SaaS where each tenant gets own VPC
+- Different lifecycle (ephemeral environments vs long-lived)
+
+**Technical Reasons:**
+
+- Different AWS region (though you can use same repo with region folders)
+- No shared infrastructure at all
+- Different Terraform version requirements
+
+❌ **Example Scenarios:**
+
+| Scenario                                  | Decision                             | Reason                                |
+| ----------------------------------------- | ------------------------------------ | ------------------------------------- |
+| Marketing website + API backend           | Same project                         | Same product, same VPC                |
+| Customer-facing app + Internal admin tool | Same project                         | Same team, can share resources        |
+| E-commerce platform + Analytics platform  | **Separate projects**                | Different teams, different lifecycles |
+| Production app + Staging app              | Same repo, different `environments/` | Same infrastructure, different stages |
+| US-East region + EU-West region           | Same repo, different region folders  | Same app, different regions           |
+| Payment processing + General app          | **Separate projects**                | Different compliance scope (PCI)      |
+
+---
+
+### Advanced Patterns
+
+#### Multi-Region Deployment
+
+```
+terraform/environments/
+├── us-east-1/
+│   ├── 00-network/
+│   └── 10-application/
+└── eu-west-1/
+    ├── 00-network/
+    └── 10-application/
+```
+
+#### Multi-Tenant SaaS (Separate VPC per Tenant)
+
+**Option 1: Workspaces**
+
+```bash
+# Create workspace per tenant
+terraform workspace new tenant-acme
+terraform apply -var="tenant_name=acme"
+```
+
+**Option 2: Separate State Files**
+
+```
+10-application/
+├── tenant-acme.tf
+├── tenant-globex.tf
+└── tenant-initech.tf
+```
+
+#### Shared Services Platform
+
+Separate project for centralized services:
+
+```
+shared-platform-infrastructure/
+└── terraform/
+    ├── logging/          # Central ELK/Loki
+    ├── monitoring/       # Central Prometheus/Grafana
+    └── ci-cd/           # Shared build infrastructure
+```
+
+---
+
+### Centralized vs Distributed: Where Should Terraform Live?
+
+#### The Two Dominant Patterns
+
+There are two common approaches to organizing Terraform code in organizations:
+
+1. **Centralized Infrastructure Repository** (what we've shown above)
+2. **Distributed (Terraform in App Repos)** ← Increasingly popular
+
+Both are valid. The choice depends on your team structure, deployment model, and organizational culture.
+
+---
+
+#### Pattern 1: Centralized Infrastructure Repository
+
+**Structure:**
+
+```
+mycompany-infrastructure/          # Single repo
+└── terraform/
+    └── environments/
+        └── production/
+            ├── 00-network/
+            └── 10-application/
+                ├── auth-api.tf
+                ├── billing-api.tf
+                ├── user-api.tf
+                └── notification-api.tf
+
+mycompany-auth-api/                # Separate app repo
+└── src/
+    └── index.js                   # Just application code
+```
+
+**Who uses this:**
+
+- Traditional enterprises
+- Organizations with dedicated platform/infrastructure teams
+- Companies with centralized change control
+- Teams following "infrastructure as a platform" model
+
+**Workflow:**
+
+1. Developer wants to deploy new service
+2. Opens PR in infrastructure repo
+3. Platform team reviews and approves
+4. Platform team (or CI/CD) applies Terraform
+5. Developer deploys application code separately
+
+**Key Characteristic:** Infrastructure and application code are **decoupled**.
+
+---
+
+#### Pattern 2: Distributed (Terraform in App Repos)
+
+**Structure:**
+
+```
+mycompany-auth-api/                # App repo
+├── src/
+│   └── index.js                   # Application code
+├── terraform/                     # Infrastructure for THIS service
+│   ├── main.tf
+│   ├── ecs.tf
+│   ├── alb.tf
+│   └── iam.tf
+└── .github/workflows/
+    └── deploy.yml                 # Deploys both infra and app
+
+mycompany-billing-api/             # Another app repo
+├── src/
+│   └── server.py
+└── terraform/                     # Different service, different infra
+    ├── main.tf
+    └── ecs.tf
+```
+
+**Who uses this:**
+
+- Tech companies (Netflix, Spotify, AWS, etc.)
+- Cloud-native startups
+- Organizations practicing "you build it, you run it"
+- Teams with strong DevOps culture
+- Microservices architectures
+
+**Workflow:**
+
+1. Developer wants to deploy new service
+2. Makes changes in **same repo** (both code and infrastructure)
+3. CI/CD runs `terraform apply` + builds/deploys app
+4. Everything deploys together atomically
+
+**Key Characteristic:** Infrastructure and application code are **coupled**.
+
+---
+
+#### When to Use Centralized Repository
+
+✅ **Good for:**
+
+- **Traditional organizations**: Separate ops and dev teams
+- **Strict change control**: All infrastructure changes require approval
+- **Shared infrastructure**: Multiple apps use same RDS, same Redis
+- **Brownfield migrations**: Importing existing infrastructure (like this project)
+- **Small engineering teams**: 1-2 platform engineers managing infra for 10+ apps
+- **Compliance requirements**: Centralized audit trail for all infrastructure
+- **Learning curve**: Team still learning Terraform
+- **Multi-tenant platforms**: One team manages infrastructure for multiple customers
+
+✅ **Benefits:**
+
+- Platform team has complete visibility and control
+- Easier to enforce standards (all Terraform in one place)
+- Can refactor shared resources without touching app repos
+- Single source of truth for all infrastructure
+- Easier to audit and comply with regulations
+- Less duplication (shared modules, shared state backends)
+
+❌ **Drawbacks:**
+
+- Platform team becomes a bottleneck (every change needs their review)
+- Slower iteration (can't deploy infra and app together)
+- Less ownership for app teams (they don't control their infrastructure)
+- Infrastructure changes lag behind app development
+- Large blast radius (one Terraform state has many services)
+
+---
+
+#### When to Use Distributed (Terraform in App Repos)
+
+✅ **Good for:**
+
+- **Cloud-native organizations**: Teams own their entire stack
+- **Microservices**: Each service is independent
+- **Fast iteration**: Deploy 10x/day without waiting for infra team
+- **Clear ownership**: Team owns code + infrastructure + operations
+- **Greenfield projects**: Building new services from scratch
+- **Service-specific resources**: Each service has its own DB, cache, ALB
+- **Strong DevOps culture**: Engineers comfortable with infrastructure
+- **Decentralized teams**: Multiple autonomous teams
+
+✅ **Benefits:**
+
+- Teams move faster (no waiting for platform team approval)
+- Infrastructure and code evolve together (same PR)
+- Clear ownership (team responsible for everything)
+- Reduced blast radius (each app has its own Terraform state)
+- Easier to delete services (delete repo = delete everything)
+- Promotes "you build it, you run it" culture
+
+❌ **Drawbacks:**
+
+- Duplication across repos (every service has similar Terraform)
+- Harder to enforce standards (need linting, policy as code)
+- Harder to audit (infrastructure spread across 100 repos)
+- Shared resources are challenging (who owns the VPC?)
+- Requires mature engineering culture (trust teams with infra)
+- More complex CI/CD (each repo needs Terraform pipeline)
+
+---
+
+#### Hybrid Approach (Most Common in Practice)
+
+**Structure:**
+
+```
+mycompany-platform-infrastructure/  # Centralized
+└── terraform/
+    └── shared/
+        ├── vpc/                    # Shared VPC
+        ├── rds-shared/             # Shared database
+        └── monitoring/             # Central monitoring
+
+mycompany-auth-api/                 # App repo
+├── src/
+└── terraform/                      # Service-specific only
+    ├── ecs.tf                      # ECS service
+    ├── alb.tf                      # Dedicated ALB
+    └── data.tf                     # References shared VPC
+```
+
+**What goes where:**
+
+| Resource Type            | Centralized Repo | App Repos |
+| ------------------------ | ---------------- | --------- |
+| **VPCs, Subnets, NAT**   | ✅ Platform      | —         |
+| **Shared RDS**           | ✅ Platform      | —         |
+| **Shared ElastiCache**   | ✅ Platform      | —         |
+| **Shared ALB**           | ✅ Platform      | —         |
+| **Service-specific ECS** | —                | ✅ App    |
+| **Service-specific RDS** | —                | ✅ App    |
+| **Service-specific ALB** | —                | ✅ App    |
+| **Security Groups**      | Both             | Both      |
+| **IAM Roles**            | —                | ✅ App    |
+| **Secrets Manager**      | —                | ✅ App    |
+
+**This is the recommended pattern for most organizations.**
+
+---
+
+#### Real-World Example: Hybrid in Action
+
+**Scenario:** E-commerce platform with 10 microservices
+
+**Platform Infrastructure Repo:**
+
+```
+platform-infrastructure/
+└── terraform/
+    └── production/
+        ├── vpc/
+        │   └── main.tf              # VPC, subnets, NAT
+        ├── shared-rds/
+        │   └── main.tf              # Shared Postgres (product catalog)
+        └── monitoring/
+            └── main.tf              # Datadog, CloudWatch
+```
+
+**Auth Service Repo (owned by Identity team):**
+
+```
+auth-service/
+├── src/
+│   └── api/
+├── terraform/
+│   ├── main.tf
+│   ├── ecs.tf                       # Dedicated ECS service
+│   ├── rds.tf                       # Dedicated user DB
+│   ├── alb.tf                       # auth.example.com ALB
+│   └── data.tf                      # References shared VPC
+└── .github/workflows/
+    └── deploy.yml
+```
+
+**Checkout Service Repo (owned by Payments team):**
+
+```
+checkout-service/
+├── src/
+├── terraform/
+│   ├── ecs.tf                       # Dedicated ECS service
+│   ├── redis.tf                     # Dedicated cart cache
+│   └── data.tf                      # References shared VPC + shared RDS
+└── .github/workflows/
+    └── deploy.yml
+```
+
+**Result:**
+
+- Platform team manages VPC (changes monthly)
+- Auth team deploys `auth-service` independently (10x/day)
+- Payments team deploys `checkout-service` independently (5x/day)
+- No blocking, no conflicts, clear ownership
+
+---
+
+#### How App Repos Reference Shared Infrastructure
+
+**Option 1: `terraform_remote_state` (Explicit)**
+
+```hcl
+# auth-service/terraform/data.tf
+data "terraform_remote_state" "vpc" {
+  backend = "s3"
+  config = {
+    bucket = "mycompany-terraform-state"
+    key    = "platform/vpc/terraform.tfstate"
+    region = "us-east-1"
+  }
+}
+
+resource "aws_ecs_service" "auth" {
+  network_configuration {
+    subnets = data.terraform_remote_state.vpc.outputs.private_subnet_ids
+  }
+}
+```
+
+**Option 2: SSM Parameter Store (Decoupled)**
+
+Platform repo exports to SSM:
+
+```hcl
+# platform-infrastructure/vpc/outputs.tf
+resource "aws_ssm_parameter" "vpc_id" {
+  name  = "/platform/vpc/id"
+  type  = "String"
+  value = aws_vpc.main.id
+}
+```
+
+App repo reads from SSM:
+
+```hcl
+# auth-service/terraform/data.tf
+data "aws_ssm_parameter" "vpc_id" {
+  name = "/platform/vpc/id"
+}
+
+resource "aws_security_group" "auth" {
+  vpc_id = data.aws_ssm_parameter.vpc_id.value
+}
+```
+
+**Option 3: Data Sources (AWS API)**
+
+```hcl
+# auth-service/terraform/data.tf
+data "aws_vpc" "main" {
+  tags = {
+    Name = "production-vpc"
+  }
+}
+
+data "aws_subnets" "private" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.main.id]
+  }
+  tags = {
+    Tier = "private"
+  }
+}
+```
+
+**Recommendation:** Start with remote state, move to SSM if you need stronger decoupling.
+
+---
+
+#### Governance and Standards with Distributed Terraform
+
+**Challenge:** How do you prevent chaos when 50 teams manage their own infrastructure?
+
+**Solutions:**
+
+**1. Terraform Modules (Enforce Patterns)**
+
+Platform team provides reusable modules:
+
+```hcl
+# auth-service/terraform/main.tf
+module "fargate_service" {
+  source = "git::https://github.com/mycompany/terraform-modules.git//fargate-service?ref=v2.0.0"
+
+  service_name = "auth-service"
+  container_image = var.image_uri
+  container_port = 3000
+
+  # Module handles: ECS service, task def, target group, ALB rule, IAM, security groups
+}
+```
+
+**2. Policy as Code (Validate Changes)**
+
+Use tools like:
+
+- **Terraform Sentinel** (HashiCorp Cloud)
+- **Open Policy Agent (OPA)** with Conftest
+- **Checkov** (security scanning)
+
+```rego
+# Example OPA policy
+deny[msg] {
+  resource := input.resource_changes[_]
+  resource.type == "aws_security_group"
+
+  rule := resource.change.after.ingress[_]
+  rule.cidr_blocks[_] == "0.0.0.0/0"
+
+  msg := sprintf("Security group %s has overly permissive ingress rule", [resource.name])
+}
+```
+
+**3. CI/CD Enforcement**
+
+```yaml
+# Required checks before merge:
+- terraform fmt -check
+- terraform validate
+- tflint
+- checkov --framework terraform
+- conftest test terraform-plan.json
+- terraform plan (manual review)
+```
+
+**4. Self-Service Platform**
+
+Platform team provides:
+
+- Terraform module library
+- Pre-approved patterns
+- Documentation and examples
+- Scaffolding tool (`create-new-service` CLI)
+
+---
+
+#### Common Pitfall: Code Ownership Conflicts
+
+**The Problem:**
+
+When you put Terraform in app repos, you often run into this organizational issue:
+
+```
+auth-service/
+├── src/                    # App team owns and reviews
+│   └── api/
+├── terraform/              # Platform team needs to review
+│   ├── ecs.tf
+│   └── iam.tf
+└── CODEOWNERS              # Who reviews what?
+```
+
+**What goes wrong:**
+
+1. **App team are code owners** for their repo
+2. **Platform team needs to review** infrastructure changes
+3. **App team doesn't want to review** Terraform (not their expertise)
+4. **PRs sit unreviewed** for days/weeks
+5. **Platform team frustrated** they can't merge their own infrastructure changes
+6. **App team annoyed** they're tagged on PRs they can't evaluate
+
+**Real-world scenario:**
+
+```
+Platform engineer opens PR:
+- Changes: terraform/ecs.tf (increase CPU from 512 to 1024)
+- Required reviewers: App team (repo owners)
+- App team response: "We don't know if this is safe, ask platform team"
+- Platform team: "We ARE the platform team, we wrote this!"
+- PR sits for 2 weeks unmerged
+```
+
+This defeats the purpose of distributed infrastructure!
+
+---
+
+#### Solution 1: CODEOWNERS with Path-Based Reviewers
+
+Use GitHub's `CODEOWNERS` file to assign different reviewers based on file paths:
+
+```
+# auth-service/.github/CODEOWNERS
+
+# App team owns application code
+/src/**                    @mycompany/auth-team
+
+# Platform team owns infrastructure code
+/terraform/**              @mycompany/platform-team
+/.github/workflows/**      @mycompany/platform-team
+
+# Shared ownership for Dockerfile (needs both perspectives)
+/Dockerfile                @mycompany/auth-team @mycompany/platform-team
+```
+
+**How it works:**
+
+- PR touching `src/api/handler.js` → Auto-requests `@auth-team`
+- PR touching `terraform/ecs.tf` → Auto-requests `@platform-team`
+- PR touching both → Requests both teams (only need approval from relevant paths)
+
+**Limitations:**
+
+- Requires GitHub Teams (works in GitHub Enterprise, paid plans)
+- GitLab equivalent: [`CODEOWNERS`](https://docs.gitlab.com/ee/user/project/codeowners/)
+- Bitbucket equivalent: [Default Reviewers](https://confluence.atlassian.com/bitbucketserver/default-reviewers-776639802.html)
+
+---
+
+#### Solution 2: Separate PRs via Branching Strategy
+
+Platform team uses dedicated infrastructure branches:
+
+```bash
+# Platform engineer workflow:
+git checkout -b infra/increase-ecs-cpu
+# Edit terraform/ecs.tf
+git push origin infra/increase-ecs-cpu
+# Open PR: infra/increase-ecs-cpu → main
+```
+
+Configure branch protection rules:
+
+```yaml
+# .github/workflows/require-platform-review.yml
+name: Require Platform Review
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "terraform/**"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if platform team approved
+        uses: dependabot/fetch-metadata@v1
+        # Custom action that verifies @platform-team approval
+```
+
+**Benefits:**
+
+- Visual cue (`infra/*` branch prefix)
+- Can skip app team review entirely for infrastructure-only changes
+- Works with any Git hosting platform
+
+**Drawbacks:**
+
+- Requires discipline (remembering to use branch prefix)
+- Can't fully automate enforcement without custom tooling
+
+---
+
+#### Solution 3: Infrastructure in Separate Repo (Reverting to Hybrid)
+
+Acknowledge the distributed model isn't working and move Terraform back to platform repo:
+
+**Before (Distributed - causing conflicts):**
+
+```
+auth-service/
+├── src/
+└── terraform/          # ← Causing review bottleneck
+```
+
+**After (Hybrid - cleaner boundaries):**
+
+```
+platform-infrastructure/
+└── terraform/
+    └── services/
+        └── auth-service/    # ← Moved here
+            ├── ecs.tf
+            └── iam.tf
+
+auth-service/
+└── src/                     # App team owns 100% of this repo
+```
+
+**What changes:**
+
+- Platform team has full ownership of infrastructure repo
+- App team never sees Terraform PRs
+- Clearer separation of concerns
+- Slight loss of "infrastructure as code alongside app code" benefit
+
+**When to do this:**
+
+- App team explicitly doesn't want infrastructure in their repo
+- Code review friction is slowing down deployments
+- Platform team is the bottleneck anyway (so centralization doesn't make it worse)
+- App team prefers "you manage infra, we manage code" model
+
+---
+
+#### Solution 4: Auto-Merge for Platform Team PRs
+
+Configure GitHub to auto-merge platform team PRs in app repos:
+
+```yaml
+# .github/workflows/auto-merge-platform-prs.yml
+name: Auto-Merge Platform PRs
+
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+    paths:
+      - "terraform/**"
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    if: github.actor == 'platform-team-bot' || contains(github.event.pull_request.labels.*.name, 'platform-managed')
+    steps:
+      - name: Run Terraform Plan
+        run: terraform plan
+
+      - name: Run Security Checks
+        run: checkov --framework terraform
+
+      - name: Auto-approve
+        run: gh pr review --approve
+
+      - name: Auto-merge
+        run: gh pr merge --auto --squash
+```
+
+**Requirements:**
+
+- High trust in platform team
+- Robust automated testing (Terraform plan, security scanning, policy checks)
+- Audit trail (all changes logged)
+
+**Benefits:**
+
+- Platform team self-services infrastructure changes
+- App team not bothered with reviews
+- Automation enforces safety checks
+
+**Risks:**
+
+- Less human oversight
+- Requires mature CI/CD and policy-as-code
+
+---
+
+#### Solution 5: Dedicated Infrastructure Repos per Service
+
+Extreme version: Every service gets TWO repos:
+
+```
+auth-service/                    # App team owns
+└── src/
+
+auth-service-infrastructure/     # Platform team owns
+└── terraform/
+```
+
+**Workflow:**
+
+1. Platform team manages `auth-service-infrastructure`
+2. App team manages `auth-service`
+3. CI/CD in `auth-service` references infrastructure outputs
+
+**When this makes sense:**
+
+- Very large services (100+ resources in Terraform)
+- Different compliance requirements (infrastructure changes need SOC2 audit)
+- Completely separate teams with zero overlap
+
+**Drawbacks:**
+
+- Lots of repos (2× the number of services)
+- Harder to discover ("where's the Terraform for auth-service?")
+- More complex to coordinate changes across repos
+
+---
+
+#### Comparison: Which Solution for Which Problem?
+
+| Problem                                       | Solution                        | Complexity | Effectiveness |
+| --------------------------------------------- | ------------------------------- | ---------- | ------------- |
+| App team doesn't know how to review Terraform | CODEOWNERS                      | Low        | ✅ High       |
+| Platform PRs sit unreviewed                   | CODEOWNERS                      | Low        | ✅ High       |
+| App team explicitly rejects Terraform in repo | Move to Hybrid (Solution 3)     | Medium     | ✅ High       |
+| Platform team trusted, mature CI/CD           | Auto-Merge (Solution 4)         | Medium     | ✅ High       |
+| Need human review but faster turnaround       | Branching Strategy (Solution 2) | Low        | ⚠️ Medium     |
+| Regulatory compliance, separate audit trails  | Separate Repos (Solution 5)     | High       | ✅ High       |
+
+---
+
+#### Recommended Approach for Your Situation
+
+Based on your description ("app teams just didn't want to do it"), here's the progression:
+
+**Immediate Fix (This Week):**
+
+Implement `CODEOWNERS`:
+
+```
+# .github/CODEOWNERS
+/terraform/**              @mycompany/platform-team
+/src/**                    @mycompany/app-team
+```
+
+This solves 80% of the problem with minimal effort.
+
+**If that doesn't work (Next Month):**
+
+Move Terraform back to centralized infrastructure repo:
+
+```
+platform-infrastructure/
+└── terraform/
+    └── services/
+        ├── auth-service/
+        ├── billing-service/
+        └── user-service/
+```
+
+Acknowledge that distributed model requires buy-in from app teams, and if they don't want it, forcing it creates friction.
+
+**Long-term (3-6 Months):**
+
+If you want to keep distributed model:
+
+1. Build better tooling (Terraform modules that hide complexity)
+2. Automate reviews (policy-as-code checks instead of human review)
+3. Educate app teams (Terraform training, pair programming)
+4. Create incentives (faster deployments if they own their infrastructure)
+
+**But honestly:** If app teams don't want to own infrastructure, don't force it. The centralized hybrid model works great for many successful companies.
+
+---
+
+#### Migration Strategy: Centralized → Distributed
+
+**If you're currently centralized and want to distribute:**
+
+**Phase 1: Extract Modules**
+
+Move common patterns to reusable modules:
+
+```
+terraform-modules/
+├── fargate-service/
+├── rds-postgres/
+└── alb-target-group/
+```
+
+**Phase 2: Pilot with One Service**
+
+1. Create `terraform/` folder in one app repo
+2. Move that service's resources from central repo
+3. Update CI/CD to apply from app repo
+4. Validate for 2 weeks
+
+**Phase 3: Scale to All Services**
+
+1. Migrate one service per week
+2. Eventually deprecate central `10-application` layer
+3. Keep central `00-network` layer (shared foundation)
+
+**Timeline:** 3-6 months for 10 services
+
+---
+
+#### Decision Matrix: Centralized vs Distributed
+
+| Factor                   | Centralized   | Distributed   | Hybrid       |
+| ------------------------ | ------------- | ------------- | ------------ |
+| **Team maturity**        | Any           | High          | Medium-High  |
+| **Org culture**          | Traditional   | DevOps        | Mixed        |
+| **Change velocity**      | Slow (weekly) | Fast (daily)  | Medium       |
+| **Team size**            | 1-5 platform  | 10+ engineers | 5+ engineers |
+| **Service count**        | Any           | 10+           | 5+           |
+| **Shared resources**     | Many          | Few           | Some         |
+| **Compliance**           | Strict        | Moderate      | Moderate     |
+| **Blast radius comfort** | Low           | High          | Medium       |
+
+---
+
+#### For This Migration Project
+
+**Recommendation: Start Centralized, Evolve to Hybrid**
+
+**Phase -1 to Phase 2 (Months 1-3):**
+
+- Use centralized infrastructure repo (what we've documented)
+- Reason: You're importing existing resources, easier to manage in one place
+
+**Phase 4+ (Months 4-6):**
+
+- Migrate to hybrid model as teams gain Terraform experience
+- Platform repo: VPC, shared RDS, shared ElastiCache
+- App repos: ECS services, service-specific ALBs
+
+**Long-term (6+ months):**
+
+- Fully distributed if team culture supports it
+- Each microservice owns its complete stack
+
+**Why this path?**
+
+- Brownfield migrations are complex → centralized reduces moving parts
+- Once stable, distribution increases team velocity
+- Your team is learning Terraform → crawl before you run
+
+---
+
+### State Backend Configuration
+
+**Bootstrap (One-Time Setup):**
+
+```hcl
+# terraform/bootstrap/main.tf
+resource "aws_s3_bucket" "terraform_state" {
+  bucket = "mycompany-terraform-state"
+}
+
+resource "aws_s3_bucket_versioning" "terraform_state" {
+  bucket = aws_s3_bucket.terraform_state.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_dynamodb_table" "terraform_locks" {
+  name         = "terraform-state-lock"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "LockID"
+
+  attribute {
+    name = "LockID"
+    type = "S"
+  }
+}
+```
+
+**Reference in Each Layer:**
+
+```hcl
+# 00-network/main.tf
+terraform {
+  backend "s3" {
+    bucket         = "mycompany-terraform-state"
+    key            = "dev/00-network/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "terraform-state-lock"
+    encrypt        = true
+  }
+}
+
+# 10-application/main.tf
+terraform {
+  backend "s3" {
+    bucket         = "mycompany-terraform-state"
+    key            = "dev/10-application/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "terraform-state-lock"
+    encrypt        = true
+  }
+}
+```
+
+---
+
+### CI/CD Integration
+
+#### GitHub Actions Workflow (Per Layer)
+
+```yaml
+# .github/workflows/terraform-application.yml
+name: Terraform Application Layer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "terraform/environments/dev/10-application/**"
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform/environments/dev/10-application
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/GitHubActionsRole
+          aws-region: us-east-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.7.0
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan
+        run: terraform plan -out=tfplan
+
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main'
+        run: terraform apply -auto-approve tfplan
+```
+
+---
+
+### Automation Strategy
+
+#### Level 1: Manual (Phase -1 to Phase 2)
+
+- Engineers run `terraform apply` locally
+- PRs reviewed by infrastructure team
+- Good for: Initial migration, learning Terraform
+
+#### Level 2: CI/CD Plan (Phase 3)
+
+- GitHub Actions runs `terraform plan` on PRs
+- Engineers still apply manually
+- Good for: Safety checks, preventing drift
+
+#### Level 3: Auto-Apply (Phase 4+)
+
+- GitHub Actions runs `terraform apply` on main branch
+- App teams self-service new services
+- Infrastructure team reviews via PR approval
+- Good for: Scale, velocity, repeatability
+
+**Recommended Progression:**
+
+- **Months 1-2**: Manual (Level 1)
+- **Months 3-4**: CI/CD Plan (Level 2)
+- **Month 5+**: Auto-Apply for `10-application` (Level 3)
+- **Always**: Manual for `00-network` (critical infrastructure)
+
+---
+
+### Security & Compliance
+
+#### State File Protection
+
+```hcl
+resource "aws_s3_bucket_public_access_block" "terraform_state" {
+  bucket = aws_s3_bucket.terraform_state.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state" {
+  bucket = aws_s3_bucket.terraform_state.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+```
+
+#### Least Privilege IAM for Terraform
+
+**Network Layer Role:**
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "ec2:*Vpc*",
+    "ec2:*Subnet*",
+    "ec2:*InternetGateway*",
+    "ec2:*NatGateway*",
+    "ec2:*RouteTable*"
+  ],
+  "Resource": "*"
+}
+```
+
+**Application Layer Role:**
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "ecs:*",
+    "elasticloadbalancing:*",
+    "rds:*",
+    "elasticache:*",
+    "secretsmanager:*",
+    "iam:*Role*",
+    "iam:*Policy*"
+  ],
+  "Resource": "*"
+}
+```
+
+---
+
+### Troubleshooting
+
+#### Common Issues
+
+**Issue: `terraform plan` shows unwanted changes after import**
+
+**Solution:**
+
+```bash
+# Add to lifecycle block:
+lifecycle {
+  ignore_changes = [
+    tags["CreatedBy"],
+    user_data,
+  ]
+}
+```
+
+**Issue: Circular dependency between layers**
+
+**Solution:**
+
+- Network layer should NEVER reference application layer
+- Flow: `00-network` outputs → `10-application` data sources
+
+**Issue: State locking errors**
+
+**Solution:**
+
+```bash
+# Force unlock (use with caution!)
+terraform force-unlock <lock-id>
+
+# Check DynamoDB for stuck locks
+aws dynamodb scan --table-name terraform-state-lock
+```
+
+---
+
+### Migration Checklist
+
+- [ ] Bootstrap S3 and DynamoDB for state backend
+- [ ] Create layered folder structure (`00-network`, `10-application`)
+- [ ] Import existing VPC resources into `00-network`
+- [ ] Import existing EC2/RDS into `10-application`
+- [ ] Verify `terraform plan` shows zero changes
+- [ ] Document all import commands in `IMPORT_COMMANDS.md`
+- [ ] Set up CI/CD for `terraform plan` on PRs
+- [ ] Define team ownership and approval workflows
+- [ ] Train teams on `terraform_remote_state` pattern
+- [ ] Establish naming conventions for resources
+- [ ] Create reusable modules for common patterns
+
+---
+
+### Additional Resources
+
+- [Terraform Best Practices](https://www.terraform-best-practices.com/)
+- [AWS Provider Documentation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
+- [Terraform State Management](https://developer.hashicorp.com/terraform/language/state)
+- [Terraform Import Documentation](https://developer.hashicorp.com/terraform/cli/import)

@@ -8,6 +8,345 @@ This phase provisions the shared AWS infrastructure that all migrated applicatio
 
 ---
 
+## Feature 0: Terraform State Management
+
+**Before provisioning any infrastructure, you must set up remote Terraform state management.** This ensures state is durable, encrypted, and team-accessible. Without this, you'll face state corruption, conflicts, and lost infrastructure.
+
+### Story 0.1: Bootstrap Terraform State Backend
+
+- **Title:** Create S3 Bucket and DynamoDB Table for Terraform State
+- **Persona:** As a **DevOps engineer**, I want remote Terraform state storage so that infrastructure state is durable, encrypted, and supports team collaboration with state locking.
+
+- **Requirements:**
+  - S3 bucket for storing Terraform state files
+  - Versioning enabled on S3 bucket for rollback capability
+  - Encryption at rest enabled
+  - Public access completely blocked
+  - TLS enforcement via bucket policy
+  - DynamoDB table for state locking (prevents concurrent modifications)
+
+- **Implementation Details:**
+  - **Create bootstrap directory:**
+    ```bash
+    mkdir -p terraform/bootstrap
+    cd terraform/bootstrap
+    ```
+  - **Create `main.tf` (local state only for this one-time bootstrap):**
+
+    ```hcl
+    provider "aws" {
+      region = "us-east-1"
+    }
+
+    # S3 Bucket for Remote State
+    resource "aws_s3_bucket" "terraform_state" {
+      bucket = "fargate-migration-state-YOUR-ACCOUNT-ID"  # Must be globally unique
+
+      lifecycle {
+        prevent_destroy = true
+      }
+
+      tags = {
+        Name        = "Terraform State Bucket"
+        Purpose     = "fargate-migration"
+        Environment = "shared"
+      }
+    }
+
+    resource "aws_s3_bucket_versioning" "enabled" {
+      bucket = aws_s3_bucket.terraform_state.id
+      versioning_configuration {
+        status = "Enabled"
+      }
+    }
+
+    resource "aws_s3_bucket_server_side_encryption_configuration" "default" {
+      bucket = aws_s3_bucket.terraform_state.id
+      rule {
+        apply_server_side_encryption_by_default {
+          sse_algorithm = "AES256"
+        }
+      }
+    }
+
+    # Public Access Block (Critical Security)
+    resource "aws_s3_bucket_public_access_block" "terraform_state" {
+      bucket                  = aws_s3_bucket.terraform_state.id
+      block_public_acls       = true
+      block_public_policy     = true
+      ignore_public_acls      = true
+      restrict_public_buckets = true
+    }
+
+    # Enforce TLS (HTTPS only)
+    resource "aws_s3_bucket_policy" "enforce_tls" {
+      bucket = aws_s3_bucket.terraform_state.id
+      policy = jsonencode({
+        Version = "2012-10-17",
+        Statement = [{
+          Sid       = "DenyRequestsWithoutTLS",
+          Effect    = "Deny",
+          Principal = "*",
+          Action    = "s3:*",
+          Resource  = [
+            aws_s3_bucket.terraform_state.arn,
+            "${aws_s3_bucket.terraform_state.arn}/*"
+          ],
+          Condition = {
+            Bool = { "aws:SecureTransport" = "false" }
+          }
+        }]
+      })
+    }
+
+    # DynamoDB for State Locking
+    resource "aws_dynamodb_table" "terraform_locks" {
+      name         = "terraform-locks"
+      billing_mode = "PAY_PER_REQUEST"
+      hash_key     = "LockID"
+
+      attribute {
+        name = "LockID"
+        type = "S"
+      }
+
+      tags = {
+        Name        = "Terraform State Lock Table"
+        Purpose     = "fargate-migration"
+        Environment = "shared"
+      }
+    }
+
+    # Outputs
+    output "state_bucket_name" {
+      value       = aws_s3_bucket.terraform_state.id
+      description = "Name of the S3 bucket for Terraform state"
+    }
+
+    output "lock_table_name" {
+      value       = aws_dynamodb_table.terraform_locks.name
+      description = "Name of the DynamoDB table for state locking"
+    }
+    ```
+
+  - **Deploy bootstrap (one-time operation):**
+
+    ```bash
+    cd terraform/bootstrap
+    terraform init
+    terraform apply
+    # Note the outputs: bucket name and DynamoDB table name
+    ```
+
+  - **Why this runs with local state:**
+    - This is a chicken-and-egg problem: you can't use remote state until the bucket exists
+    - Bootstrap runs once with local state to create the bucket
+    - All subsequent Terraform operations use the remote backend
+    - Keep the local `terraform.tfstate` file safe as backup (commit to git or store securely)
+
+- **Acceptance Criteria:**
+  - ✅ S3 bucket created with globally unique name
+  - ✅ Bucket versioning enabled (verified in console)
+  - ✅ Encryption enabled (AES256)
+  - ✅ Public access blocked (all 4 settings enabled)
+  - ✅ TLS enforcement policy attached
+  - ✅ DynamoDB table `terraform-locks` created with `LockID` hash key
+  - ✅ Outputs displayed bucket and table names
+
+---
+
+### Story 0.2: Configure Remote Backend for Infrastructure
+
+- **Title:** Migrate Infrastructure Code to Use Remote State
+- **Persona:** As a **DevOps engineer**, I want to configure the Terraform backend so that all infrastructure changes use the secure S3 backend with locking.
+
+- **Requirements:**
+  - Backend configuration for infrastructure Terraform code
+  - State file isolation per environment if multi-environment
+  - Verification that state lock works
+
+- **Implementation Details:**
+  - **Create infrastructure directory structure:**
+
+    ```bash
+    mkdir -p terraform/infrastructure
+    cd terraform/infrastructure
+    ```
+
+  - **Create `backend.tf`:**
+
+    ```hcl
+    terraform {
+      required_version = ">= 1.7.0"
+
+      backend "s3" {
+        bucket         = "fargate-migration-state-YOUR-ACCOUNT-ID"
+        key            = "infrastructure/terraform.tfstate"
+        region         = "us-east-1"
+        dynamodb_table = "terraform-locks"
+        encrypt        = true
+      }
+
+      required_providers {
+        aws = {
+          source  = "hashicorp/aws"
+          version = "~> 5.0"
+        }
+      }
+    }
+
+    provider "aws" {
+      region = var.aws_region
+
+      default_tags {
+        tags = {
+          Project     = "fargate-migration"
+          ManagedBy   = "terraform"
+          Environment = var.environment
+        }
+      }
+    }
+    ```
+
+  - **Create `variables.tf`:**
+
+    ```hcl
+    variable "aws_region" {
+      description = "AWS region for infrastructure"
+      type        = string
+      default     = "us-east-1"
+    }
+
+    variable "environment" {
+      description = "Environment name (e.g., production, staging)"
+      type        = string
+      default     = "production"
+    }
+
+    variable "project_name" {
+      description = "Project name for resource naming"
+      type        = string
+      default     = "fargate-migration"
+    }
+    ```
+
+  - **Initialize backend:**
+
+    ```bash
+    cd terraform/infrastructure
+    terraform init
+    # You should see: "Successfully configured the backend 's3'!"
+    ```
+
+  - **Verify state locking works:**
+
+    ```bash
+    # In Terminal 1:
+    terraform plan  # This acquires a lock
+
+    # In Terminal 2 (while Terminal 1 is running):
+    terraform plan  # Should fail with lock error
+    ```
+
+  - **Multi-environment setup (optional):**
+    If you plan to have dev/staging/production environments, use separate state files:
+    ```
+    terraform/
+    ├── bootstrap/
+    │   └── main.tf
+    └── environments/
+        ├── dev/
+        │   ├── main.tf
+        │   ├── backend.tf      # key = "dev/terraform.tfstate"
+        │   └── terraform.tfvars
+        ├── staging/
+        │   ├── main.tf
+        │   ├── backend.tf      # key = "staging/terraform.tfstate"
+        │   └── terraform.tfvars
+        └── production/
+            ├── main.tf
+            ├── backend.tf      # key = "production/terraform.tfstate"
+            └── terraform.tfvars
+    ```
+
+- **Acceptance Criteria:**
+  - ✅ `terraform init` successfully configures S3 backend
+  - ✅ `terraform plan` shows no changes (expected for empty state)
+  - ✅ State file visible in S3 bucket at expected key path
+  - ✅ State locking verified (concurrent operations blocked)
+  - ✅ Team members can run `terraform plan` after pulling code
+
+---
+
+### Story 0.3: Establish Terraform State Backup Strategy
+
+- **Title:** Document State Recovery Procedures
+- **Persona:** As a **DevOps engineer**, I need documented procedures for recovering from state file corruption or accidental deletion so that we can recover infrastructure without panic.
+
+- **Requirements:**
+  - Document state recovery procedure
+  - Document how to use S3 versioning to recover previous state
+  - Test state recovery process
+
+- **Implementation Details:**
+  - **State recovery procedure (document in team wiki/runbook):**
+
+    **Scenario 1: Recover from corrupted state**
+
+    ```bash
+    # List versions of state file
+    aws s3api list-object-versions \
+      --bucket fargate-migration-state-YOUR-ACCOUNT-ID \
+      --prefix infrastructure/terraform.tfstate
+
+    # Download specific version
+    aws s3api get-object \
+      --bucket fargate-migration-state-YOUR-ACCOUNT-ID \
+      --key infrastructure/terraform.tfstate \
+      --version-id <VERSION-ID> \
+      terraform.tfstate.backup
+
+    # Verify contents
+    cat terraform.tfstate.backup | jq '.version'
+
+    # Restore (upload as current version)
+    aws s3 cp terraform.tfstate.backup \
+      s3://fargate-migration-state-YOUR-ACCOUNT-ID/infrastructure/terraform.tfstate
+    ```
+
+    **Scenario 2: Accidentally deleted DynamoDB lock table**
+
+    ```bash
+    # Recreate from bootstrap code
+    cd terraform/bootstrap
+    terraform apply -target=aws_dynamodb_table.terraform_locks
+    ```
+
+    **Scenario 3: Lost local bootstrap state**
+    - If you lose the local `terraform.tfstate` from bootstrap:
+    - Import existing resources manually:
+      ```bash
+      terraform import aws_s3_bucket.terraform_state fargate-migration-state-YOUR-ACCOUNT-ID
+      terraform import aws_dynamodb_table.terraform_locks terraform-locks
+      ```
+
+  - **Test recovery (practice run):**
+    1. Make a backup of current state: `terraform state pull > backup.tfstate`
+    2. Intentionally break state: Edit S3 file to corrupt JSON
+    3. Run `terraform plan` — should fail
+    4. Restore from S3 version using procedure above
+    5. Run `terraform plan` — should succeed
+    6. Document findings and update runbook
+
+- **Acceptance Criteria:**
+  - ✅ State recovery procedure documented in team wiki
+  - ✅ Recovery tested in non-production environment
+  - ✅ S3 versioning confirmed enabled and tested
+  - ✅ Team trained on recovery procedure
+  - ✅ Runbook includes emergency contacts
+
+---
+
 ## Feature 1: Network Foundation (VPC)
 
 ### Story 1.1: VPC and Subnet Provisioning

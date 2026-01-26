@@ -18,6 +18,7 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 - **Requirements:**
   - At least two public subnets (for ALB) across different Availability Zones
   - At least two private subnets (for Fargate tasks) across different Availability Zones
+  - **Sufficient IP addresses in subnets to support task scaling**
   - Internet Gateway attached to VPC
   - NAT Gateway (or alternative) for private subnet internet access
   - Route tables configured correctly
@@ -31,6 +32,44 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
     - Check: Subnets with NO direct route to Internet Gateway
     - Why: Best practice—Fargate tasks should not have public IPs
     - Tasks here cannot be directly reached from the internet
+  - **IP Address Requirements (The Hidden Capacity Trap):**
+    - **The Problem:** Each Fargate task gets its own ENI (Elastic Network Interface) and consumes an IP address from the subnet
+    - **The Symptom:** Tasks fail with "ResourceInitializationError: unable to pull secrets or registry auth" or stuck in PENDING even though everything else is configured correctly
+    - **Root Cause:** Subnet ran out of available IPs
+    - **AWS IP Reservations:** First 4 IPs and last IP in each subnet are reserved by AWS (unusable)
+      - Example: `/28` subnet (16 IPs) → Only 11 IPs available for tasks
+      - Example: `/24` subnet (256 IPs) → 251 IPs available for tasks
+    - **Calculate Required IPs:**
+
+      ```
+      Required IPs = (Max tasks per service × Number of services) × 2
+
+      Why ×2? Rolling deployments run new tasks BEFORE stopping old ones
+      Example: Service with 10 tasks deploying new version = 20 IPs during rollout
+      ```
+
+    - **Common Subnet Sizing:**
+      | CIDR Block | Total IPs | Usable IPs | Recommended For |
+      |------------|-----------|------------|-----------------|
+      | `/28` | 16 | 11 | ❌ Too small - avoid |
+      | `/27` | 32 | 27 | ⚠️ Dev/test only (max ~10 tasks) |
+      | `/26` | 64 | 59 | ⚠️ Small production (max ~25 tasks) |
+      | `/25` | 128 | 123 | ✅ Medium production (max ~60 tasks) |
+      | `/24` | 256 | 251 | ✅ Recommended for production |
+      | `/23` | 512 | 507 | ✅ Large production with growth room |
+
+    - **Check Current Subnet Size:**
+      ```bash
+      aws ec2 describe-subnets --subnet-ids subnet-xxx \
+        --query 'Subnets[*].[SubnetId,CidrBlock,AvailableIpAddressCount]' \
+        --output table
+      ```
+    - **If Subnet is Too Small:**
+      - **Option 1:** Create new larger subnets, migrate gradually
+      - **Option 2:** Use multiple subnets per AZ (ECS can use all subnets you specify)
+      - **Option 3:** Reduce desired task count or consolidate services
+    - **Best Practice:** Use `/24` or larger for private subnets running Fargate tasks
+
   - **NAT Gateway (The Hidden Cost Trap):**
     - The Problem: Private subnet tasks have no internet access—they cannot pull Docker images from ECR
     - The Symptom: Tasks stuck in `PENDING` forever, then fail with "CannotPullContainerError"
@@ -42,48 +81,90 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 - **Acceptance Criteria:**
   - ✅ VPC has at least 2 public subnets in different AZs
   - ✅ VPC has at least 2 private subnets in different AZs
+  - ✅ **Each subnet has sufficient IP addresses (at least /24 recommended for production)**
+  - ✅ **Available IP count per subnet documented**
+  - ✅ **Maximum task capacity calculated: (Available IPs ÷ 2) per subnet**
   - ✅ Private subnets can reach the internet (via NAT or public IP assignment)
   - ✅ Decision documented: NAT Gateway vs Public IP vs VPC Endpoints
 
 ---
 
-### Story 1.2: Plan VPC Endpoints (Optional Cost Optimization)
+## Feature 2: Security Group Planning
 
-- **Title:** Evaluate VPC Endpoints to Reduce NAT Gateway Costs
-- **Persona:** As a **cloud architect**, I need to understand VPC Endpoint options so that I can reduce data transfer costs and avoid NAT Gateway dependency for AWS service traffic.
+### Story 2.0: Discover and Inventory Data Stores
+
+- **Title:** Identify All RDS, ElastiCache, and Other Data Stores
+- **Persona:** As a **DevOps engineer**, I need to discover all databases and caches in the AWS account so that I understand what data stores the application depends on and can plan network/security configurations.
 
 - **Requirements:**
-  - Identify AWS services the application will call
-  - Evaluate cost/benefit of VPC Endpoints vs NAT Gateway
-  - Document decision for implementation phase
+  - Discover all RDS instances in the account/region
+  - Discover all ElastiCache clusters in the account/region
+  - Determine which data stores are used by the application being migrated
+  - Document connection details and VPC placement
+  - Identify any other data stores (DocumentDB, DynamoDB, OpenSearch, etc.)
+
 - **Implementation Details:**
-  - **Critical: S3 Gateway Endpoint is FREE and prevents massive NAT costs:**
-    - ECR Docker image layers are stored in S3
-    - Without S3 Gateway Endpoint, image pulls route through NAT Gateway
-    - Large images pulling through NAT can cost $10-50+/month per service
-    - S3 Gateway Endpoint has **zero** endpoint cost and **zero** data processing cost
-    - **Always create S3 Gateway Endpoint, even if you choose NAT Gateway for other traffic**
-  - **Required for Fargate without NAT:**
-    - `com.amazonaws.<region>.ecr.api` (ECR API calls)
-    - `com.amazonaws.<region>.ecr.dkr` (Docker image pulls)
-    - `com.amazonaws.<region>.s3` (ECR stores layers in S3) - Gateway endpoint, free
-    - `com.amazonaws.<region>.logs` (CloudWatch Logs)
-  - **Commonly needed:**
-    - `com.amazonaws.<region>.secretsmanager` (if using Secrets Manager)
-    - `com.amazonaws.<region>.ssm` (if using SSM Parameter Store)
-  - **Cost comparison:**
-    - NAT Gateway: $32/month + $0.045/GB processed
-    - Interface Endpoint: ~$7.30/month per endpoint per AZ + $0.01/GB processed
-    - For low-traffic apps, VPC Endpoints may be cheaper; for high-traffic, NAT may be simpler
+  - **Discover RDS instances:**
+
+    ```bash
+    # List all RDS instances
+    aws rds describe-db-instances \
+      --query 'DBInstances[*].[DBInstanceIdentifier,Engine,EngineVersion,DBInstanceClass,Endpoint.Address,DBSubnetGroup.VpcId,DBInstanceStatus]' \
+      --output table
+
+    # Get detailed info for specific instance
+    aws rds describe-db-instances \
+      --db-instance-identifier <your-db-name>
+    ```
+
+  - **Discover ElastiCache clusters:**
+
+    ```bash
+    # List Redis clusters
+    aws elasticache describe-cache-clusters \
+      --query 'CacheClusters[*].[CacheClusterId,Engine,EngineVersion,CacheNodeType,ConfigurationEndpoint.Address,CacheSubnetGroupName]' \
+      --output table
+
+    # Get subnet group details (shows VPC)
+    aws elasticache describe-cache-subnet-groups \
+      --cache-subnet-group-name <subnet-group-name>
+    ```
+
+  - **For each data store, document:**
+    - **Resource ID/Name**: What it's called in AWS
+    - **Type**: RDS (Postgres/MySQL/etc.), ElastiCache (Redis/Memcached), etc.
+    - **VPC ID**: Which VPC is it in?
+    - **Subnet Group**: Which subnets does it span?
+    - **Endpoint**: Connection string/hostname
+    - **Port**: Default or custom port
+    - **Used by which app(s)**: Which application(s) connect to it?
+    - **Purpose**: What's it used for? (user data, sessions, cache, etc.)
+  - **Determine if the data store will be used by Fargate:**
+    - Check application code/config for database connections
+    - Check `.env` files or environment variables for `DATABASE_URL`, `REDIS_URL`, etc.
+    - SSH to EC2 and check: `netstat -tn | grep :5432` (Postgres), `grep :6379` (Redis)
+  - **Cross-VPC scenarios:**
+    - If data store is in a different VPC than where Fargate will run:
+      - **Option 1:** Use VPC Peering to connect the VPCs
+      - **Option 2:** Migrate data store to same VPC (complex, requires downtime planning)
+      - **Option 3:** Use AWS PrivateLink (if applicable)
+    - Document this as a blocker requiring resolution in Phase 2
+  - **Other data stores to check:**
+    - **DynamoDB**: `aws dynamodb list-tables` (VPC endpoints may be needed for private subnets)
+    - **DocumentDB**: `aws docdb describe-db-clusters`
+    - **OpenSearch**: `aws opensearch list-domain-names`
+    - **S3**: `aws s3 ls` (check if app reads/writes to specific buckets)
 
 - **Acceptance Criteria:**
-  - ✅ List of required AWS services documented
-  - ✅ Cost comparison completed for your expected traffic
-  - ✅ Decision documented: NAT Gateway vs VPC Endpoints vs hybrid approach
+  - ✅ All RDS instances discovered and documented
+  - ✅ All ElastiCache clusters discovered and documented
+  - ✅ Each data store's VPC placement verified
+  - ✅ Application dependencies on each data store documented
+  - ✅ Cross-VPC scenarios identified with resolution plan
+  - ✅ Other data stores (DynamoDB, S3, OpenSearch, etc.) inventoried
+  - ✅ Connection endpoints and ports documented for Phase 1 app configuration
 
 ---
-
-## Feature 2: Security Group Planning
 
 ### Story 2.1: Audit Database Security Groups
 
@@ -177,7 +258,6 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
     - Name: `[app-name]-fargate-sg` (e.g., `auth-api-fargate-sg`)
     - Update database/cache SGs to allow the NEW Fargate SG
     - Keep EC2 SG intact until migration complete
-  
   - **Self-referencing rules (critical for service-to-service communication):**
     - Tasks in the same ECS service may need to communicate (e.g., clustering, leader election)
     - Security group must allow inbound traffic from itself
@@ -370,7 +450,6 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
   - Check via: AWS Console → Service Quotas → Amazon ECS
   - Or: `aws service-quotas list-service-quotas --service-code ecs`
   - Request increase: Console or `aws service-quotas request-service-quota-increase`
-  
   - **Check API rate limits in addition to resource quotas:**
     - AWS APIs have **rate limits** (requests per second) in addition to resource quotas
     - Common bottlenecks during deployment:
@@ -678,43 +757,39 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
     dpkg -l | grep -E 'datadog|newrelic'  # Debian/Ubuntu
     rpm -qa | grep -E 'datadog|newrelic'  # RHEL/Amazon Linux
     ```
-  
   - **Common agents and their Fargate strategies:**
-    
-    | Agent Type | EC2 Agent | Fargate Strategy |
-    |------------|-----------|------------------|
-    | **APM** | Datadog Agent | Sidecar container OR Datadog Lambda extension |
-    | | New Relic Infrastructure | Not supported - use New Relic APM library |
-    | | Dynatrace OneAgent | Sidecar container with proper configuration |
-    | **Log Shipping** | Filebeat, Fluentd | **Not needed** - use awslogs driver instead |
-    | | Splunk Forwarder | **Not needed** - ship logs via Firehose or Lambda |
-    | | CloudWatch Agent | **Not needed** - use awslogs driver |
-    | **Security** | CrowdStrike Falcon | **Not supported on Fargate** - use AWS GuardDuty + Inspector |
-    | | Qualys, Tenable | **Not supported** - scan container images in ECR instead |
-    | **Service Mesh** | Consul Agent | Not recommended - use AWS App Mesh or Service Connect |
-  
+
+    | Agent Type       | EC2 Agent                | Fargate Strategy                                             |
+    | ---------------- | ------------------------ | ------------------------------------------------------------ |
+    | **APM**          | Datadog Agent            | Sidecar container OR Datadog Lambda extension                |
+    |                  | New Relic Infrastructure | Not supported - use New Relic APM library                    |
+    |                  | Dynatrace OneAgent       | Sidecar container with proper configuration                  |
+    | **Log Shipping** | Filebeat, Fluentd        | **Not needed** - use awslogs driver instead                  |
+    |                  | Splunk Forwarder         | **Not needed** - ship logs via Firehose or Lambda            |
+    |                  | CloudWatch Agent         | **Not needed** - use awslogs driver                          |
+    | **Security**     | CrowdStrike Falcon       | **Not supported on Fargate** - use AWS GuardDuty + Inspector |
+    |                  | Qualys, Tenable          | **Not supported** - scan container images in ECR instead     |
+    | **Service Mesh** | Consul Agent             | Not recommended - use AWS App Mesh or Service Connect        |
+
   - **Decision tree for each agent:**
     1. **Is there an AWS-native alternative?**
        - **Monitoring:** CloudWatch Container Insights (built-in)
        - **Logs:** CloudWatch Logs (awslogs driver)
        - **Security:** GuardDuty, Inspector, Security Hub
        - → **Preferred:** Use AWS native tools
-    
     2. **Does the vendor support Fargate sidecar?**
        - **Datadog:** Yes ([docs](https://docs.datadoghq.com/integrations/ecs_fargate/))
        - **New Relic:** Yes, via sidecar
        - **Dynatrace:** Yes ([docs](https://www.dynatrace.com/support/help/setup-and-configuration/setup-on-container-platforms/amazon-web-services/amazon-ecs/deploy-oneagent-as-ecs-fargate-sidecar))
        - → **Acceptable:** Deploy as sidecar container
-    
     3. **Can we instrument the app instead of using a host agent?**
        - **APM:** Use application-level SDK (Datadog Tracer, New Relic APM library, X-Ray SDK)
        - → **Good:** Less infrastructure overhead
-    
     4. **Is this agent still needed?**
        - Legacy agents from previous vendors
        - Duplicate monitoring (e.g., both Datadog and CloudWatch)
        - → **Best:** Simplify and consolidate
-  
+
   - **Sidecar container example (Datadog):**
     ```json
     {
@@ -722,30 +797,28 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
         {
           "name": "app",
           "image": "my-app:latest",
-          "portMappings": [{"containerPort": 3000}],
+          "portMappings": [{ "containerPort": 3000 }],
           "environment": [
-            {"name": "DD_AGENT_HOST", "value": "localhost"},
-            {"name": "DD_TRACE_AGENT_PORT", "value": "8126"}
+            { "name": "DD_AGENT_HOST", "value": "localhost" },
+            { "name": "DD_TRACE_AGENT_PORT", "value": "8126" }
           ]
         },
         {
           "name": "datadog-agent",
           "image": "public.ecr.aws/datadog/agent:latest",
           "environment": [
-            {"name": "DD_API_KEY", "valueFrom": "arn:aws:secretsmanager:..."},
-            {"name": "ECS_FARGATE", "value": "true"},
-            {"name": "DD_APM_ENABLED", "value": "true"}
+            { "name": "DD_API_KEY", "valueFrom": "arn:aws:secretsmanager:..." },
+            { "name": "ECS_FARGATE", "value": "true" },
+            { "name": "DD_APM_ENABLED", "value": "true" }
           ]
         }
       ]
     }
     ```
-  
   - **Cost implications:**
     - Sidecar containers consume additional vCPU/memory (e.g., Datadog agent ~128MB)
     - Calculate: (Number of tasks) × (Agent memory) × $0.004445/GB/hour
     - Example: 10 tasks × 128MB × 730 hours = ~$4/month extra
-  
   - **Migration planning:**
     - **Phase 0 (Discovery):** Audit and plan (this story)
     - **Phase 1 (App Readiness):** Update task definitions to include sidecars
