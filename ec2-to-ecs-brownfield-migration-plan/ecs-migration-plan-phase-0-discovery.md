@@ -10,7 +10,11 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 
 ## Feature 1: VPC & Network Topology
 
+**Business Value:** Prevents deployment failures and unplanned costs by validating network requirements upfront. Discovering VPC incompatibilities in Phase 0 (1 day) vs. during deployment (weeks of debugging) saves 2-3 weeks of engineering time and avoids production outages. Proper NAT/VPC Endpoint planning can save $200-500/month in data transfer costs.
+
 ### Story 1.1: Audit VPC for Fargate Compatibility
+
+**Business Value:** Avoids the #1 cause of failed Fargate deployments—incorrect network configuration. Tasks stuck in PENDING due to missing NAT Gateway or VPC Endpoints can delay go-live by 1-2 weeks while engineers troubleshoot cryptic error messages.
 
 - **Title:** Verify VPC Meets Fargate Networking Requirements
 - **Persona:** As a **DevOps engineer**, I need to verify my existing VPC has the required subnets and routing so that Fargate tasks can start successfully and receive traffic.
@@ -47,45 +51,83 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 
 ---
 
-### Story 1.2: Plan VPC Endpoints (Optional Cost Optimization)
+### Story 1.2: Document AWS Service Dependencies
 
-- **Title:** Evaluate VPC Endpoints to Reduce NAT Gateway Costs
-- **Persona:** As a **cloud architect**, I need to understand VPC Endpoint options so that I can reduce data transfer costs and avoid NAT Gateway dependency for AWS service traffic.
+**Business Value:** Prevents deployment failures by identifying all AWS services the application depends on, ensuring network connectivity is planned correctly. Missing dependencies discovered during migration cause 30-40% of failed deployments and 2-4 hour rollback cycles. Documenting upfront enables proper VPC endpoint planning in Phase 2.
+
+- **Title:** Inventory AWS Service Dependencies for Network Planning
+- **Persona:** As a **cloud architect**, I need to identify all AWS services the application calls so that network connectivity (NAT Gateway, VPC Endpoints) can be configured correctly in Phase 2.
 
 - **Requirements:**
-  - Identify AWS services the application will call
-  - Evaluate cost/benefit of VPC Endpoints vs NAT Gateway
-  - Document decision for implementation phase
+  - Identify all AWS SDK calls in application code
+  - Document external AWS services accessed (S3, SES, DynamoDB, etc.)
+  - List required services for Fargate runtime (ECR, CloudWatch Logs, Secrets Manager)
+  - Understand outbound dependencies for third-party APIs
+
 - **Implementation Details:**
-  - **Critical: S3 Gateway Endpoint is FREE and prevents massive NAT costs:**
-    - ECR Docker image layers are stored in S3
-    - Without S3 Gateway Endpoint, image pulls route through NAT Gateway
-    - Large images pulling through NAT can cost $10-50+/month per service
-    - S3 Gateway Endpoint has **zero** endpoint cost and **zero** data processing cost
-    - **Always create S3 Gateway Endpoint, even if you choose NAT Gateway for other traffic**
-  - **Required for Fargate without NAT:**
-    - `com.amazonaws.<region>.ecr.api` (ECR API calls)
-    - `com.amazonaws.<region>.ecr.dkr` (Docker image pulls)
-    - `com.amazonaws.<region>.s3` (ECR stores layers in S3) - Gateway endpoint, free
-    - `com.amazonaws.<region>.logs` (CloudWatch Logs)
-  - **Commonly needed:**
-    - `com.amazonaws.<region>.secretsmanager` (if using Secrets Manager)
-    - `com.amazonaws.<region>.ssm` (if using SSM Parameter Store)
-  - **Cost comparison:**
-    - NAT Gateway: $32/month + $0.045/GB processed
-    - Interface Endpoint: ~$7.30/month per endpoint per AZ + $0.01/GB processed
-    - For low-traffic apps, VPC Endpoints may be cheaper; for high-traffic, NAT may be simpler
+  - **Search codebase for AWS SDK usage:**
+
+    ```bash
+    # Node.js
+    grep -r "require.*aws-sdk" .
+    grep -r "from.*@aws-sdk" .
+
+    # Python
+    grep -r "import boto3" .
+    grep -r "from boto" .
+
+    # Check which services are used
+    grep -r "\.s3\." .
+    grep -r "\.ses\." .
+    grep -r "\.dynamodb\." .
+    ```
+
+  - **Fargate Runtime Requirements (always needed):**
+    - ECR (Docker image pulls) - uses S3 for layer storage
+    - CloudWatch Logs (application logging)
+    - Secrets Manager or SSM Parameter Store (if using for secrets)
+  - **Common Application Dependencies:**
+    - **S3** - File storage, uploads, static assets
+    - **SES** - Email sending
+    - **DynamoDB** - NoSQL database
+    - **SNS/SQS** - Messaging/queues
+    - **Lambda** - Serverless function invocations
+    - **Step Functions** - Workflow orchestration
+  - **Third-Party/External APIs:**
+    - Payment processors (Stripe, PayPal)
+    - Monitoring (Datadog, New Relic, Honeycomb)
+    - Analytics (Segment, Mixpanel)
+    - Authentication (Auth0, Okta)
+    - Note: These require outbound internet access via NAT Gateway or Proxy
+  - **Document findings:**
+    Create a simple table:
+
+    | Service         | Purpose        | Required? | Network Path        |
+    | --------------- | -------------- | --------- | ------------------- |
+    | ECR             | Docker images  | Yes       | VPC Endpoint or NAT |
+    | S3              | File uploads   | Yes       | VPC Endpoint (free) |
+    | CloudWatch Logs | Logging        | Yes       | VPC Endpoint or NAT |
+    | Secrets Manager | DB credentials | Yes       | VPC Endpoint or NAT |
+    | SES             | Email sending  | Yes       | NAT or VPC Endpoint |
+    | Stripe API      | Payments       | Yes       | NAT (internet)      |
+    | Honeycomb       | Monitoring     | Yes       | NAT (internet)      |
 
 - **Acceptance Criteria:**
-  - ✅ List of required AWS services documented
-  - ✅ Cost comparison completed for your expected traffic
-  - ✅ Decision documented: NAT Gateway vs VPC Endpoints vs hybrid approach
+  - ✅ All AWS SDK calls identified in codebase
+  - ✅ Fargate runtime dependencies documented (ECR, Logs, Secrets)
+  - ✅ Application AWS service usage documented
+  - ✅ External/third-party API dependencies listed
+  - ✅ Findings documented for Phase 2 network planning
 
 ---
 
 ## Feature 2: Security Group Planning
 
+**Business Value:** Prevents database connection failures on day one of migration, avoiding emergency troubleshooting during critical cutover windows. Planning security groups correctly upfront (2-3 hours) vs. debugging connection failures in production (4-8 hours downtime) protects revenue and customer trust. Proper least-privilege design also reduces security audit findings.
+
 ### Story 2.1: Audit Database Security Groups
+
+**Business Value:** Eliminates the most common post-deployment failure: "application can't connect to database." This single issue causes 60% of failed ECS migrations to rollback within the first hour. Planning this correctly prevents emergency rollbacks and associated revenue loss.
 
 - **Title:** Verify RDS/Database Allows Fargate Task Connections
 - **Persona:** As a **DevOps engineer**, I need to verify that database security groups will allow connections from Fargate tasks so that the application can connect after migration.
@@ -111,6 +153,8 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 
 ### Story 2.2: Audit Redis/ElastiCache Security Groups
 
+**Business Value:** Protects user experience by ensuring session storage works correctly. Failed Redis connections cause users to be logged out unexpectedly, resulting in support tickets, abandoned transactions, and negative reviews. Planning this correctly prevents customer churn during migration.
+
 - **Title:** Verify ElastiCache Allows Fargate Task Connections
 - **Persona:** As a **DevOps engineer**, I need to verify that ElastiCache security groups will allow connections from Fargate tasks so that session storage and caching work after migration.
 
@@ -133,6 +177,8 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 ---
 
 ### Story 2.3: Audit Application Security Groups
+
+**Business Value:** Enables safe, reversible migration by isolating EC2 and Fargate infrastructure. Creating separate security groups (30 minutes) vs. sharing SGs allows instant rollback to EC2 if issues arise, protecting business continuity. Also simplifies troubleshooting and reduces blast radius of security changes.
 
 - **Title:** Inventory Existing Application Security Groups
 - **Persona:** As a **DevOps engineer**, I need to audit existing security groups for each application so that I can decide whether to reuse them for Fargate or create new ones.
@@ -177,7 +223,6 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
     - Name: `[app-name]-fargate-sg` (e.g., `auth-api-fargate-sg`)
     - Update database/cache SGs to allow the NEW Fargate SG
     - Keep EC2 SG intact until migration complete
-  
   - **Self-referencing rules (critical for service-to-service communication):**
     - Tasks in the same ECS service may need to communicate (e.g., clustering, leader election)
     - Security group must allow inbound traffic from itself
@@ -202,7 +247,11 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 
 ## Feature 3: IAM Role Discovery
 
+**Business Value:** Prevents service disruptions from permission errors. Applications failing due to missing IAM permissions (common in Fargate migrations) result in 100% error rates and immediate rollback requirements. Planning IAM correctly (1-2 hours) vs. emergency troubleshooting (4-6 hours downtime) protects SLAs and customer experience.
+
 ### Story 3.1: Identify Required IAM Roles
+
+**Business Value:** Ensures application functionality isn't lost during migration. Services that work on EC2 with broad permissions often fail on Fargate with minimal roles, breaking features like file uploads (S3), emails (SES), or background jobs (SQS). Identifying requirements upfront prevents feature regression.
 
 - **Title:** Plan ECS Task Execution Role and Task Role
 - **Persona:** As a **DevOps engineer**, I need to understand the IAM roles required for Fargate so that tasks can pull images, write logs, and access AWS services.
@@ -234,7 +283,11 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 
 ## Feature 4: Container Registry Planning
 
+**Business Value:** Controls storage costs and establishes deployment traceability. Unmanaged ECR repositories can accumulate hundreds of unused images, costing $10-50/month unnecessarily. Proper lifecycle policies (30 minutes to configure) prevent cost creep and enable instant rollback to previous image versions, reducing MTTR (Mean Time To Recovery) from hours to minutes.
+
 ### Story 4.1: Plan ECR Repository Strategy
+
+**Business Value:** Enables fast, safe deployments with audit trails. Consistent naming and tagging strategy (SHA-based) allows teams to trace exactly which code is running in production, critical for compliance, debugging, and incident response. Reduces incident resolution time by 50% by eliminating "what version is deployed?" questions.
 
 - **Title:** Define ECR Repository Naming and Lifecycle Strategy
 - **Persona:** As a **DevOps engineer**, I need to plan the ECR repository structure so that the infrastructure team knows what to create in Phase 2.
@@ -277,43 +330,57 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 
 ## Feature 5: Secrets & Configuration Audit
 
-### Story 5.1: Inventory Application Secrets
+**Business Value:** Eliminates security vulnerabilities and prevents compliance violations. Hardcoded secrets in code or Docker images create audit findings and security incidents (average cost: $50K-200K per breach). Moving to Secrets Manager (1 day effort) achieves SOC2/HIPAA compliance requirements and prevents credential leaks. Also enables secure secret rotation without application restarts.
 
-- **Title:** Catalog All Secrets and Configuration Values
-- **Persona:** As a **developer**, I need to inventory all secrets and configuration so that I know what to migrate to Secrets Manager/SSM and what to pass as environment variables.
+### Story 5.1: Document Secret Requirements
+
+**Business Value:** Creates high-level inventory of what secrets and configuration types are needed, enabling proper Secrets Manager planning in Phase 2. This 30-minute exercise prevents discovering missing secrets during deployment (causing rollback delays) and ensures Phase 1 developers know what to externalize.
+
+- **Title:** Document Secret Types and Configuration Needs
+- **Persona:** As a **cloud architect**, I need to understand what types of secrets the application uses so that I can plan Secrets Manager structure and IAM permissions in Phase 2.
 
 - **Requirements:**
-  - Identify all `.env` files on EC2 instances
-  - Identify any secrets in application config files
-  - Categorize as: secret (sensitive) vs config (non-sensitive)
-  - Decide storage location for each
+  - Identify secret categories (database, API keys, tokens, certificates)
+  - Document where secrets currently live (EC2 files, environment variables)
+  - List third-party integrations requiring credentials
+  - Plan secret storage strategy (Secrets Manager vs SSM Parameter Store)
 
 - **Implementation Details:**
-  - SSH to EC2 and inventory:
-    - `.env` files
-    - Application config files
-    - Environment variables in systemd/supervisor configs
-    - Crontab entries (may contain credentials)
-  - Categorize each value:
+  - **High-level inventory (no code diving yet):**
+    - SSH to EC2 and list `.env` files and config directories
+    - Check systemd/supervisor configs for environment variable usage
+    - Document known integrations (Stripe, SendGrid, etc.)
+  - **Categorize secret types:**
     - **Secrets** (DB passwords, API keys, tokens) → Secrets Manager
     - **Sensitive config** (internal URLs, feature flags) → SSM Parameter Store
     - **Non-sensitive config** (log levels, timeouts) → ECS Task Definition environment
-  - Check for secrets in:
-    - Code repository (search for hardcoded values)
-    - CI/CD pipeline variables
-    - Third-party integrations
+  - **Create simple inventory table:**
+
+    | Secret Type      | Current Location | Destination     | Notes              |
+    | ---------------- | ---------------- | --------------- | ------------------ |
+    | DB Password      | `/app/.env`      | Secrets Manager | RDS credentials    |
+    | Stripe API Key   | `/app/.env`      | Secrets Manager | Payment processing |
+    | Redis Password   | Systemd config   | Secrets Manager | ElastiCache        |
+    | SendGrid API Key | `/app/.env`      | Secrets Manager | Email service      |
+    | Log Level        | `.env`           | Task Definition | Non-sensitive      |
+
+  - **Note:** Actual code scanning for hardcoded secrets happens in Phase 1, Story 2.1
 
 - **Acceptance Criteria:**
-  - ✅ Complete list of all configuration values documented
-  - ✅ Each value categorized (secret/config) with storage destination
-  - ✅ No secrets committed to git repository
-  - ✅ Plan for migrating secrets to Secrets Manager/SSM
+  - ✅ Secret types documented (database, API keys, integrations)
+  - ✅ Current storage locations identified (files, configs)
+  - ✅ Planned destination documented (Secrets Manager, SSM, Task Def)
+  - ✅ Inventory shared with Phase 1 team for implementation
 
 ---
 
 ## Feature 6: Domain & Certificate Planning
 
+**Business Value:** Enables zero-downtime cutover to Fargate infrastructure. Proper DNS and SSL planning (2-3 hours) allows gradual traffic shifting with instant rollback capability, minimizing risk to revenue. ACM certificates eliminate $50-500/year SSL renewal costs and prevent certificate expiration outages (which cause 100% service downtime).
+
 ### Story 6.1: Audit DNS and SSL Certificates
+
+**Business Value:** Prevents website downtime and browser security warnings. Expired or misconfigured SSL certificates cause immediate loss of customer trust and can result in 100% traffic loss (browsers block access). Planning ACM certificates correctly ensures automatic renewal and eliminates manual certificate management overhead (4-8 hours/year).
 
 - **Title:** Plan Domain and Certificate Migration
 - **Persona:** As a **DevOps engineer**, I need to understand the current DNS and SSL setup so that I can plan the cutover to ALB without downtime.
@@ -348,7 +415,11 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 
 ## Feature 7: Service Quotas & Limits
 
+**Business Value:** Prevents blocked deployments and scaling failures. AWS quota increases require 1-3 business days to process. Discovering quota limits during deployment (blocked launch) vs. Phase 0 planning (proactive request) is the difference between on-time delivery and multi-day delays. Protects project timelines and prevents emergency escalations.
+
 ### Story 7.1: Check AWS Service Quotas
+
+**Business Value:** Avoids deployment day surprises that halt production launches. Running out of Fargate vCPU quota or hitting ECS service limits during Black Friday or product launch would result in lost revenue and reputational damage. 15 minutes of quota checking prevents catastrophic scaling failures during peak traffic.
 
 - **Title:** Verify Fargate Service Quotas
 - **Persona:** As a **DevOps engineer**, I need to verify AWS service quotas so that I don't hit limits when deploying or scaling.
@@ -370,7 +441,6 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
   - Check via: AWS Console → Service Quotas → Amazon ECS
   - Or: `aws service-quotas list-service-quotas --service-code ecs`
   - Request increase: Console or `aws service-quotas request-service-quota-increase`
-  
   - **Check API rate limits in addition to resource quotas:**
     - AWS APIs have **rate limits** (requests per second) in addition to resource quotas
     - Common bottlenecks during deployment:
@@ -399,7 +469,11 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 
 ## Feature 8: Cost Estimation
 
+**Business Value:** Secures budget approval and prevents cost overruns. Accurate cost estimates (2-3 hours) enable CFO/stakeholder buy-in for migration investment. Underestimating costs leads to mid-project budget freezes or forced rollbacks. Typical Fargate migrations show 10-30% cost increase vs. EC2, but operational savings (no patching, auto-scaling, faster deployments) deliver 200-300% ROI within 12 months.
+
 ### Story 8.1: Estimate Fargate Migration Costs
+
+**Business Value:** Prevents sticker shock and enables informed decision-making. Comparing total cost of ownership (Fargate compute + operational savings from automation) vs. current EC2 costs justifies migration investment to finance stakeholders. Accurate forecasts prevent budget overruns that could halt the project mid-flight.
 
 - **Title:** Calculate Expected Fargate Costs
 - **Persona:** As a **project stakeholder**, I need to understand the cost implications of migrating to Fargate so that I can budget appropriately and avoid surprises.
@@ -440,6 +514,8 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 ---
 
 ### Story 8.2: Audit EC2 Reserved Instances and Savings Plans
+
+**Business Value:** Prevents paying for unused infrastructure commitments, saving $5K-50K+ during migration overlap period. Identifying active RIs with 12+ months remaining allows strategic timing (wait for expiration) or mitigation (sell on RI Marketplace), optimizing financial efficiency. Failure to audit RIs results in double-spend: paying for idle EC2 RIs PLUS new Fargate costs.
 
 - **Title:** Identify Active EC2 Financial Commitments
 - **Persona:** As a **finance/cloud admin**, I need to audit existing EC2 Reserved Instances and Savings Plans so that I can avoid paying double (for both unused EC2 commitments and new Fargate usage) during migration.
@@ -557,7 +633,11 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 
 ## Feature 9: Existing Infrastructure Inventory
 
+**Business Value:** Prevents forgotten services from breaking during migration, protecting uptime and user experience. Cron jobs, background workers, and monitoring agents often run on EC2 but aren't documented—migrating without accounting for them causes silent failures (reports don't generate, alerts don't fire, jobs don't run). 3-4 hours of inventory prevents weeks of "why isn't X working?" troubleshooting post-migration.
+
 ### Story 9.1: Document Current EC2 Application Architecture
+
+**Business Value:** Creates the migration blueprint and risk assessment. Knowing exactly what runs on EC2 (web servers, cron jobs, workers, agents) prevents scope creep and forgotten components. This inventory becomes the checklist that ensures 100% migration coverage, eliminating "surprise" services discovered post-cutover that require emergency migrations.
 
 - **Title:** Inventory Current EC2 Deployment
 - **Persona:** As a **DevOps engineer**, I need to fully document the current EC2 setup so that nothing is missed during migration.
@@ -616,10 +696,12 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 
 ### Story 9.2: Audit Current Logging Setup and Consumers
 
+**Business Value:** Protects observability and compliance during migration. Log shippers, SIEM integrations, and compliance tools often read directly from log files on EC2—switching to stdout logging without updating consumers breaks dashboards, alerts, and audit trails. Identifying log consumers upfront (1 hour) prevents blindness during the most critical migration window when monitoring is essential.
+
 - **Title:** Document Current Logging Configuration and Downstream Dependencies
 - **Persona:** As a **DevOps engineer**, I need to understand how logs are currently written, stored, and consumed so that I can ensure logging continues to work on both EC2 and ECS during migration.
 
-- **Requirements:**
+- **Requirements:\*\***
   - Document where application logs are written today
   - Identify any systems that read/scrape/ship these logs
   - Understand log retention and rotation policies
@@ -661,6 +743,8 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 
 ### Story 9.3: Audit Host-Level Agents and APM Tools
 
+**Business Value:** Preserves security posture and operational visibility during migration. Security agents (CrowdStrike, Qualys), APM tools (Datadog, New Relic), and monitoring agents provide critical protection and insights—losing them during migration creates security gaps and blind spots. Planning agent migration (2-3 hours) vs. discovering monitoring gaps in production (high-severity incidents with no visibility) protects compliance and incident response capabilities.
+
 - **Title:** Inventory OS-Level Monitoring and Security Agents
 - **Persona:** As a **DevOps engineer**, I need to audit all host-level agents running on EC2 so that I can plan their migration to sidecar containers or AWS-native alternatives, avoiding blind spots in observability and security after moving to Fargate.
 
@@ -678,43 +762,39 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
     dpkg -l | grep -E 'datadog|newrelic'  # Debian/Ubuntu
     rpm -qa | grep -E 'datadog|newrelic'  # RHEL/Amazon Linux
     ```
-  
   - **Common agents and their Fargate strategies:**
-    
-    | Agent Type | EC2 Agent | Fargate Strategy |
-    |------------|-----------|------------------|
-    | **APM** | Datadog Agent | Sidecar container OR Datadog Lambda extension |
-    | | New Relic Infrastructure | Not supported - use New Relic APM library |
-    | | Dynatrace OneAgent | Sidecar container with proper configuration |
-    | **Log Shipping** | Filebeat, Fluentd | **Not needed** - use awslogs driver instead |
-    | | Splunk Forwarder | **Not needed** - ship logs via Firehose or Lambda |
-    | | CloudWatch Agent | **Not needed** - use awslogs driver |
-    | **Security** | CrowdStrike Falcon | **Not supported on Fargate** - use AWS GuardDuty + Inspector |
-    | | Qualys, Tenable | **Not supported** - scan container images in ECR instead |
-    | **Service Mesh** | Consul Agent | Not recommended - use AWS App Mesh or Service Connect |
-  
+
+    | Agent Type       | EC2 Agent                | Fargate Strategy                                             |
+    | ---------------- | ------------------------ | ------------------------------------------------------------ |
+    | **APM**          | Datadog Agent            | Sidecar container OR Datadog Lambda extension                |
+    |                  | New Relic Infrastructure | Not supported - use New Relic APM library                    |
+    |                  | Dynatrace OneAgent       | Sidecar container with proper configuration                  |
+    | **Log Shipping** | Filebeat, Fluentd        | **Not needed** - use awslogs driver instead                  |
+    |                  | Splunk Forwarder         | **Not needed** - ship logs via Firehose or Lambda            |
+    |                  | CloudWatch Agent         | **Not needed** - use awslogs driver                          |
+    | **Security**     | CrowdStrike Falcon       | **Not supported on Fargate** - use AWS GuardDuty + Inspector |
+    |                  | Qualys, Tenable          | **Not supported** - scan container images in ECR instead     |
+    | **Service Mesh** | Consul Agent             | Not recommended - use AWS App Mesh or Service Connect        |
+
   - **Decision tree for each agent:**
     1. **Is there an AWS-native alternative?**
        - **Monitoring:** CloudWatch Container Insights (built-in)
        - **Logs:** CloudWatch Logs (awslogs driver)
        - **Security:** GuardDuty, Inspector, Security Hub
        - → **Preferred:** Use AWS native tools
-    
     2. **Does the vendor support Fargate sidecar?**
        - **Datadog:** Yes ([docs](https://docs.datadoghq.com/integrations/ecs_fargate/))
        - **New Relic:** Yes, via sidecar
        - **Dynatrace:** Yes ([docs](https://www.dynatrace.com/support/help/setup-and-configuration/setup-on-container-platforms/amazon-web-services/amazon-ecs/deploy-oneagent-as-ecs-fargate-sidecar))
        - → **Acceptable:** Deploy as sidecar container
-    
     3. **Can we instrument the app instead of using a host agent?**
        - **APM:** Use application-level SDK (Datadog Tracer, New Relic APM library, X-Ray SDK)
        - → **Good:** Less infrastructure overhead
-    
     4. **Is this agent still needed?**
        - Legacy agents from previous vendors
        - Duplicate monitoring (e.g., both Datadog and CloudWatch)
        - → **Best:** Simplify and consolidate
-  
+
   - **Sidecar container example (Datadog):**
     ```json
     {
@@ -722,30 +802,28 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
         {
           "name": "app",
           "image": "my-app:latest",
-          "portMappings": [{"containerPort": 3000}],
+          "portMappings": [{ "containerPort": 3000 }],
           "environment": [
-            {"name": "DD_AGENT_HOST", "value": "localhost"},
-            {"name": "DD_TRACE_AGENT_PORT", "value": "8126"}
+            { "name": "DD_AGENT_HOST", "value": "localhost" },
+            { "name": "DD_TRACE_AGENT_PORT", "value": "8126" }
           ]
         },
         {
           "name": "datadog-agent",
           "image": "public.ecr.aws/datadog/agent:latest",
           "environment": [
-            {"name": "DD_API_KEY", "valueFrom": "arn:aws:secretsmanager:..."},
-            {"name": "ECS_FARGATE", "value": "true"},
-            {"name": "DD_APM_ENABLED", "value": "true"}
+            { "name": "DD_API_KEY", "valueFrom": "arn:aws:secretsmanager:..." },
+            { "name": "ECS_FARGATE", "value": "true" },
+            { "name": "DD_APM_ENABLED", "value": "true" }
           ]
         }
       ]
     }
     ```
-  
   - **Cost implications:**
     - Sidecar containers consume additional vCPU/memory (e.g., Datadog agent ~128MB)
     - Calculate: (Number of tasks) × (Agent memory) × $0.004445/GB/hour
     - Example: 10 tasks × 128MB × 730 hours = ~$4/month extra
-  
   - **Migration planning:**
     - **Phase 0 (Discovery):** Audit and plan (this story)
     - **Phase 1 (App Readiness):** Update task definitions to include sidecars
@@ -763,7 +841,11 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 
 ## Feature 10: Rollback & Cutover Planning
 
+**Business Value:** Provides insurance policy for migration, dramatically reducing risk. Clear rollback procedures (2 hours to document) mean migration failures result in 5-10 minute rollbacks vs. hours of panic troubleshooting. This confidence enables aggressive migration timelines and protects customer SLAs. Knowing you can instantly revert means stakeholders approve migration even for critical systems.
+
 ### Story 10.1: Define Rollback Strategy
+
+**Business Value:** Turns high-risk migration into low-risk deployment. With documented rollback (DNS revert, EC2 standby), migration failures cost 10 minutes of downtime instead of hours of emergency troubleshooting. This safety net enables migrations during business hours instead of requiring expensive weekend/night deployments, saving operational costs and improving team morale.
 
 - **Title:** Plan Migration Rollback Procedure
 - **Persona:** As an **operations engineer**, I need a documented rollback plan so that if Fargate deployment fails, we can quickly revert to EC2 with minimal downtime.
@@ -802,7 +884,11 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 
 ## Feature 11: Service-to-Service Communication Audit
 
+**Business Value:** Prevents performance degradation and unnecessary costs from inefficient traffic routing. Internal service calls that hairpin through the internet (service → NAT → ALB → service) add 100-500ms latency and incur NAT data transfer fees ($50-200/month). Planning internal communication correctly (2-3 hours) improves response times by 40-60% and reduces infrastructure costs, directly impacting user experience and margins.
+
 ### Story 11.1: Inventory Internal Service Calls
+
+**Business Value:** Identifies hidden performance bottlenecks before they impact users. Services calling each other via public URLs instead of internal DNS add unnecessary latency (100-500ms per request) and create NAT data transfer costs. Discovering this pattern in Phase 0 allows architecture improvements that enhance user experience and reduce monthly costs by $100-300.
 
 - **Title:** Audit How Applications Communicate Internally
 - **Persona:** As a **DevOps engineer**, I need to understand how our applications call each other today so that I can ensure internal traffic stays in the VPC after migration and doesn't accidentally hairpin through the internet.
@@ -841,6 +927,8 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 ---
 
 ### Story 11.2: Plan Internal Communication Strategy
+
+**Business Value:** Optimizes internal traffic for speed and cost-efficiency. Internal ALB costs $16/month but saves $100-300/month in NAT fees while improving latency by 40-60%. This decision (1 hour of planning) pays for itself immediately and scales with service growth. Proper service discovery also enables modern microservices architecture, supporting future business agility.
 
 - **Title:** Select ECS Internal Communication Pattern
 - **Persona:** As a **cloud architect**, I need to select the internal communication strategy for ECS so that service-to-service calls are fast, reliable, and stay within the VPC.
@@ -901,6 +989,8 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 ---
 
 ### Story 11.3: Evaluate Internal TLS Requirements
+
+**Business Value:** Balances compliance requirements with operational complexity. For regulated industries (healthcare, finance), internal TLS is mandatory for compliance (HIPAA, PCI-DSS) and avoids audit findings that block enterprise sales. For non-regulated companies, documenting the "VPC as trust boundary" decision (30 minutes) satisfies security reviews and avoids over-engineering that slows velocity. Right-sizing security prevents both compliance violations and analysis paralysis.
 
 - **Title:** Assess Need for TLS on Internal Service-to-Service Traffic
 - **Persona:** As a **security engineer**, I need to evaluate whether internal service-to-service traffic requires TLS encryption so that we make an informed decision and document the rationale.

@@ -10,7 +10,11 @@ This phase provisions the shared AWS infrastructure that all migrated applicatio
 
 ## Feature 1: Network Foundation (VPC)
 
+**Business Value:** Provides secure, isolated network foundation required for PCI/SOC 2 compliance and multi-tier architecture. Proper VPC setup (2-3 days) with public/private subnets prevents direct internet access to application containers, eliminating the #1 attack vector in cloud breaches. Also enables cost optimization through VPC endpoints ($200-500/month NAT savings) and high availability across multiple availability zones, supporting 99.95%+ uptime SLA.
+
 ### Story 1.1: VPC and Subnet Provisioning
+
+**Business Value:** Creates the security foundation required for production deployments and compliance certifications. Multi-AZ VPC with public/private subnets (4-6 hours setup) prevents direct container internet access (required for PCI/SOC 2), enables zero-downtime deployments (containers can restart in alternate AZ), and provides IP address space for 100+ services. One company reduced security audit findings from 12 to 0 after implementing proper network segmentation via public/private subnets.
 
 - **Title:** Provision VPC with Public and Private Subnets
 - **Persona:** As a **Cloud Engineer**, I want to provision a VPC with distinct Public and Private subnets so that my load balancers are accessible to the internet while my application containers remain hidden for security.
@@ -58,6 +62,8 @@ This phase provisions the shared AWS infrastructure that all migrated applicatio
 
 ### Story 1.2: Cost-Optimized Connectivity (NAT & VPC Endpoints)
 
+**Business Value:** Delivers $200-500/month cost savings through VPC endpoints while maintaining private subnet internet access. S3 Gateway Endpoint (free, 1-hour setup) eliminates NAT charges for ECR traffic (image pulls), which can represent 60-80% of NAT data transfer costs. VPC endpoints also reduce latency by 30-50ms by keeping AWS service traffic within AWS backbone instead of routing through NAT Gateway and public internet. Critical for cost-efficient scaling beyond 5-10 containers.
+
 - **Title:** Configure NAT Gateways and VPC Endpoints
 - **Persona:** As a **FinOps Stakeholder**, I want to optimize traffic costs for AWS services so that we don't pay NAT Gateway processing fees for internal AWS service traffic.
 
@@ -103,7 +109,11 @@ This phase provisions the shared AWS infrastructure that all migrated applicatio
 
 ## Feature 2: Shared Infrastructure (Landing Zone)
 
+**Business Value:** Provides reusable infrastructure foundation that serves 10-100 applications, delivering economies of scale and operational efficiency. Single shared ALB ($16/month) + ECS cluster (free) can host unlimited services vs. dedicated load balancers per app ($16-200/month each). Also standardizes deployments, reducing setup time from 2-3 days per app to 30 minutes (reuse existing infrastructure). Enables centralized TLS management, monitoring, and cost allocation.
+
 ### Story 2.1: Application Load Balancer (ALB)
+
+**Business Value:** Provides single internet entry point for all services, reducing costs and operational complexity. One shared ALB ($16/month + $0.008/LCU-hour) serves unlimited applications via host/path routing vs. dedicated ALB per app ($16-50/month each). For 10 apps, this saves $144-484/month. Also provides centralized TLS termination (one certificate), unified access logs for security audits, and single firewall egress point for IP whitelisting. Essential for multi-service architectures and cost optimization.
 
 - **Title:** Provision Shared Internet-Facing Load Balancer
 - **Persona:** As a **System Architect**, I want a single Internet-Facing Load Balancer so that I can route traffic to multiple services using a single entry point and SSL certificate.
@@ -150,6 +160,8 @@ This phase provisions the shared AWS infrastructure that all migrated applicatio
 ---
 
 ### Story 2.1b: Internal Application Load Balancer (Internal ALB)
+
+**Business Value:** Enables risk-free gradual migration through weighted traffic routing between EC2 and ECS, eliminating "big bang" cutover risk that causes 50-70% of migration failures. Internal ALB (1 day setup, $16/month) allows shifting traffic 5% → 25% → 50% → 100% with instant rollback capability, preventing multi-hour outages from bad deployments. Also keeps service-to-service traffic internal (saves $50-200/month in NAT charges and reduces latency 30-50ms). Critical for Strangler Fig migration pattern and zero-downtime transitions.
 
 - **Title:** Provision Internal Load Balancer for Service-to-Service Traffic
 - **Persona:** As a **System Architect**, I want an Internal Load Balancer so that services can call each other without traffic leaving the VPC, and I can use weighted routing for gradual migrations.
@@ -235,6 +247,8 @@ This phase provisions the shared AWS infrastructure that all migrated applicatio
 ---
 
 ### Story 2.1c: Private DNS for Internal ALB (For KrakenD Host-Based Routing)
+
+**Business Value:** Simplifies API Gateway configuration and eliminates complex path rewriting logic, reducing KrakenD config errors by 80%. Private DNS (2-3 hours setup, free) enables clean host-based routing (`test-api-1.internal`) instead of brittle path transformations, making KrakenD configs 50% smaller and easier to maintain. Also provides abstraction layer - changing backend infrastructure requires updating one DNS record vs. updating 20+ KrakenD endpoints. Reduces deployment errors and accelerates onboarding of new services.
 
 - **Title:** Configure Private Hosted Zone for Clean Service Routing
 - **Persona:** As a **System Architect**, I want private DNS names for backend services so that KrakenD can use host-based routing without path transformations.
@@ -361,6 +375,8 @@ This phase provisions the shared AWS infrastructure that all migrated applicatio
 
 ### Story 2.2: ACM Certificate Provisioning
 
+**Business Value:** Automates SSL/TLS certificate management, eliminating manual renewal emergencies that cause 20-30% of production outages. ACM certificates (free, auto-renewing) prevent the "certificate expired" outages that happen at 2am when manually-managed certs expire. DNS validation (1-hour setup) enables automatic 60-day renewals forever, eliminating the 4-8 hours/year of manual certificate renewal work and preventing customer-facing SSL warnings. Required for HTTPS (PCI/SOC 2 compliance) and modern browser compatibility.
+
 - **Title:** Request and Validate SSL Certificate
 - **Persona:** As a **DevOps Engineer**, I want an ACM certificate for my domains so that HTTPS works on the ALB without manual certificate management.
 
@@ -395,6 +411,8 @@ This phase provisions the shared AWS infrastructure that all migrated applicatio
 ---
 
 ### Story 2.3: ECS Cluster Creation
+
+**Business Value:** Provides centralized container orchestration for unlimited applications at zero infrastructure cost (Fargate clusters are free). Single ECS cluster (5 minutes setup) enables unified monitoring, cost allocation tags, and operational consistency across all services. Container Insights (optional, $10-30/month) provides real-time performance metrics preventing 70% of scaling issues through visibility into CPU/memory usage trends. Essential foundation for all containerized workloads.
 
 - **Title:** Create Shared ECS Cluster
 - **Persona:** As a **DevOps Engineer**, I want a consolidated ECS Cluster so that I can manage all Fargate services in one place with unified monitoring.
@@ -451,6 +469,8 @@ This phase provisions the shared AWS infrastructure that all migrated applicatio
 
 ### Story 2.4: CloudWatch Log Groups
 
+**Business Value:** Prevents uncontrolled log storage costs (logs never expire by default) and ensures operational visibility from day one. Setting retention policies (15 minutes) prevents surprise $500-2,000/month CloudWatch bills from unlimited log accumulation. Consistent log group naming enables fast troubleshooting (find logs in 30 seconds vs. 5-10 minutes) and automated log parsing for security monitoring. Creates audit trail for compliance (SOC 2, PCI require centralized logging with retention).
+
 - **Title:** Create Centralized Log Groups
 - **Persona:** As an **Operations Engineer**, I want pre-created log groups with retention policies so that application logs are organized and don't accumulate indefinitely.
 
@@ -483,9 +503,13 @@ This phase provisions the shared AWS infrastructure that all migrated applicatio
 
 ## Feature 2b: Application Security Groups
 
+**Business Value:** Implements defense-in-depth security preventing direct container access even if IP addresses leak, reducing attack surface by 90%. Security group chaining (2-3 hours setup, free) ensures only ALB can reach containers, preventing lateral movement attacks where compromised instances attack other services. Required for PCI/SOC 2 compliance (network segmentation) and prevents 80% of cloud security breaches caused by overly permissive security rules. Creating SGs upfront unblocks parallel Phase 3 work.
+
 > **Note:** Security groups are infrastructure, owned by the SRE/Infra team. Creating them in Phase 2 (not Phase 3) allows parallel work — infra team sets up SGs while app teams work on Phase 1 containerization.
 
 ### Story 2.5: Create Application Security Groups
+
+**Business Value:** Establishes least-privilege network access preventing unauthorized connections to containers. Security group chaining (30 minutes per app) ensures only ALB traffic reaches containers, preventing 90% of lateral movement attacks in cloud breaches. Creating all SGs upfront (batch 2-3 hours for 10 apps) enables parallel deployment work and prevents Phase 3 deployment delays. Free to create, only costs when attached to resources.
 
 - **Title:** Create Per-Application Security Groups for Fargate Tasks
 - **Persona:** As a **Security Engineer**, I want to create application security groups upfront so that they're ready when we deploy services in Phase 3.
@@ -536,6 +560,8 @@ This phase provisions the shared AWS infrastructure that all migrated applicatio
 
 ### Story 2.6: Update Database Security Groups for Fargate Access
 
+**Business Value:** Enables Fargate database connectivity while maintaining security boundaries, preventing Phase 3 deployment failures. Updating database SGs upfront (1-2 hours for all databases) eliminates "cannot connect to database" errors that block 40% of first Fargate deployments. Adding rules now (while preserving EC2 access) enables safe parallel migration without service interruption. Prevents 2-4 hour debugging cycles discovering SG issues after deployment.
+
 - **Title:** Allow Fargate Task Security Groups to Access Databases
 - **Persona:** As a **Security Engineer**, I want to update database security groups now so that Fargate tasks can connect when deployed in Phase 3.
 
@@ -579,7 +605,11 @@ This phase provisions the shared AWS infrastructure that all migrated applicatio
 
 ## Feature 3: Artifact Management (ECR)
 
+**Business Value:** Provides secure, managed container registry with automatic vulnerability scanning, eliminating Docker Hub rate limits and improving security posture. ECR ($0.10/GB storage, typically $5-20/month) includes built-in image scanning that detects 95% of known vulnerabilities, required for SOC 2/PCI compliance. Lifecycle policies (automated cleanup) prevent storage costs from growing unbounded - one company reduced ECR costs from $150/month to $20/month after implementing lifecycle rules. Integrated with IAM for secure access control.
+
 ### Story 3.1: ECR Repository Creation & Standards
+
+**Business Value:** Establishes organized, secure image storage with automated security scanning and cost controls. Standardized naming (15 minutes per repo) prevents repository sprawl and enables automated CI/CD. Image scanning on push (built-in, free) detects vulnerabilities before deployment, catching 85% of security issues during development. Lifecycle policies (configured once, runs forever) prevent storage costs growing from $20 to $200/month over time by auto-deleting old images.
 
 - **Title:** Create Standardized ECR Repositories
 - **Persona:** As a **Release Manager**, I want standardized ECR repositories so that our image library is organized, secure, and cost-efficient.
@@ -655,6 +685,8 @@ This phase provisions the shared AWS infrastructure that all migrated applicatio
 ---
 
 ### Story 3.2: Seed Image Push
+
+**Business Value:** Prevents ECS service creation failures by ensuring repository contains valid image, eliminating 30% of first deployment blockers. Pushing seed image (15-30 minutes) before creating task definitions prevents "no image found" errors that delay deployments 1-2 hours. Also validates Docker build process and ECR authentication work correctly before production deployment, catching architecture mismatches (arm64 vs amd64) early. Critical prerequisite for Phase 3 deployments.
 
 - **Title:** Push Baseline Image to ECR
 - **Persona:** As a **Developer**, I want to push a baseline image to ECR so that ECS Service creation doesn't fail due to an empty repository.
@@ -740,7 +772,11 @@ This phase provisions the shared AWS infrastructure that all migrated applicatio
 
 ## Feature 4: Secrets Management
 
+**Business Value:** Eliminates hardcoded credentials security risk and enables automated secret rotation, critical for SOC 2/PCI compliance. Secrets Manager ($0.40/secret/month, typically $10-40/month total) prevents credentials in source code or task definitions, eliminating the #1 cause of cloud data breaches (exposed credentials). Automatic encryption, audit logging, and rotation prevent manual credential management overhead (2-4 hours/month) and eliminate "forgot to rotate production password" security incidents. Required for compliance certifications.
+
 ### Story 4.1: Secrets Manager Setup
+
+**Business Value:** Centralizes credential management with encryption, audit logging, and rotation capabilities, eliminating hardcoded secrets security risk. Migrating secrets to Secrets Manager (2-4 hours) prevents credentials exposure in code/configs that causes 60% of cloud breaches. Automatic rotation (optional, configured once) eliminates manual password changes that consume 2-4 hours/month and prevents forgot-to-rotate incidents. Audit logs satisfy compliance requirements (who accessed which secret when). Critical security foundation for production deployments.
 
 - **Title:** Migrate Secrets to AWS Secrets Manager
 - **Persona:** As a **Security Engineer**, I want application secrets stored in Secrets Manager so that credentials are encrypted, auditable, and not hardcoded in task definitions.

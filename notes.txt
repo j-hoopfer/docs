@@ -1,0 +1,17 @@
+should this be in here? Story 1.1: Secure AWS Account & Enable IAM Identity Center (SSO) i don't think 
+i do think that there should be assign appropriate permissions to project team members, or something like that
+can you break up Story 1.2: into one story for security and another for cost guardrails; especially since it may require different roles
+each of the tasks will be performed by different roles, obviuosly which is called out in the persona. i'm wondering if there is a better way of denoting team assignment in the plan outside of the persona?
+
+
+missing pre-reqs
+setting up security & cost guardrails require permissions that a junior software engineer or infrastricture person may not have. 
+configuring AWS SSO requires SSO being configured for teams AWS account
+need to clarify that this plan is for migration in existing vpc
+
+callouts
+- do i endable the AWS security features in root? or which accounts? and i think the stories should be check first
+- add why i'm configuring AWS SSO Profile vs just using AWS configured
+- why am i deleting Default VPC? does this assume this is a new aws account? 
+- for any installations on mac, aws, terrform, etc, need to give both the brew and native install
+- should the permission structure be least privledge? right now everyone is being assigned admin
