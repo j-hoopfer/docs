@@ -12,7 +12,11 @@
 
 ## Feature 1: AWS Account Access Setup
 
+**Business Value:** Establishes secure, auditable team access while eliminating shared credentials and security vulnerabilities. Proper SSO setup (2-3 hours) prevents credential leaks, enables instant access revocation, and meets SOC2/ISO27001 compliance requirements. Organizations without SSO experience 3x higher security incident rates and spend 5-10 hours/month manually managing access keys.
+
 ### Story 1.1: Secure AWS Account & Enable IAM Identity Center (SSO)
+
+**Business Value:** Prevents the #1 cause of AWS account compromises—leaked root credentials or shared access keys. Root MFA and SSO (1 hour setup) protect against unauthorized access that could result in $50K-500K+ in fraudulent charges, data breaches, or ransomware. Enables audit trails showing who accessed what and when, critical for compliance and incident response.
 
 - **Title:** Configure Secure AWS Access for Migration Team
 - **Persona:** As a **cloud administrator**, I need to set up secure AWS access for the migration team so that everyone can access AWS resources without sharing root credentials or long-lived access keys.
@@ -87,17 +91,17 @@
 
 ---
 
-### Story 1.2: Enable Security & Cost Guardrails
+### Story 1.2: Enable Security Guardrails
 
-- **Title:** Configure Foundational AWS Security and Billing Alerts
-- **Persona:** As a **cloud administrator**, I need to enable security monitoring and cost alerts so that we detect anomalies early and prevent surprise bills during migration.
+**Business Value:** Provides early warning system for security threats and compliance violations before they become incidents. GuardDuty catches cryptocurrency mining (avg cost: $10K-50K/incident) within 15 minutes, unauthorized access attempts, and data exfiltration. Security Hub identifies CIS Benchmark violations and misconfigurations that could fail SOC2/ISO27001 audits. IAM Access Analyzer prevents accidental public exposure of S3 buckets and databases that lead to data breaches.
+
+- **Title:** Configure Foundational AWS Security Monitoring
+- **Persona:** As a **security administrator** (or **cloud administrator**), I need to enable security monitoring and threat detection so that we identify and respond to security incidents before they cause breaches or compliance violations.
 
 - **Requirements:**
   - GuardDuty enabled (threat detection)
   - Security Hub enabled (security posture)
   - IAM Access Analyzer enabled (public access detection)
-  - CloudWatch billing alarms configured
-  - AWS Budgets configured
   - Delete default VPC (security best practice)
 
 - **Implementation Details:**
@@ -140,69 +144,7 @@
 
   **What it does:** Alerts when S3 buckets, IAM roles, KMS keys, etc. are accessible outside your account
 
-  #### 4) Configure Billing Alarms
-
-  **Enable Billing Alerts:**
-  - Console: Billing Dashboard → Billing Preferences
-  - Check ✅ "Receive Billing Alerts"
-  - Save preferences
-
-  **Create CloudWatch Billing Alarm:**
-
-  ```bash
-  # First, create SNS topic for alerts (replace YOUR_EMAIL)
-  aws sns create-topic --name billing-alerts --region us-east-1
-  aws sns subscribe \
-    --topic-arn arn:aws:sns:us-east-1:YOUR_ACCOUNT_ID:billing-alerts \
-    --protocol email \
-    --notification-endpoint YOUR_EMAIL@company.com \
-    --region us-east-1
-  # Check email and confirm subscription
-
-  # Create alarm
-  aws cloudwatch put-metric-alarm \
-    --alarm-name "EstimatedCharges-USD-100" \
-    --alarm-description "Bill estimate exceeds $100" \
-    --metric-name EstimatedCharges \
-    --namespace AWS/Billing \
-    --statistic Maximum \
-    --period 21600 \
-    --threshold 100 \
-    --comparison-operator GreaterThanThreshold \
-    --dimensions Name=Currency,Value=USD \
-    --evaluation-periods 1 \
-    --alarm-actions arn:aws:sns:us-east-1:YOUR_ACCOUNT_ID:billing-alerts \
-    --region us-east-1
-  ```
-
-  **Create AWS Budget:**
-
-  ```bash
-  aws budgets create-budget \
-    --account-id YOUR_ACCOUNT_ID \
-    --budget '{
-      "BudgetName":"MigrationMonthlyBudget",
-      "BudgetLimit":{"Amount":"500","Unit":"USD"},
-      "TimeUnit":"MONTHLY",
-      "BudgetType":"COST",
-      "CostTypes":{"IncludeCredit":false,"IncludeRefund":false}
-    }' \
-    --notifications-with-subscribers '[
-      {
-        "Notification":{
-          "NotificationType":"ACTUAL",
-          "ComparisonOperator":"GREATER_THAN",
-          "Threshold":80,
-          "ThresholdType":"PERCENTAGE"
-        },
-        "Subscribers":[{"SubscriptionType":"EMAIL","Address":"YOUR_EMAIL@company.com"}]
-      }
-    ]'
-  ```
-
-  Or via Console: AWS Budgets → Create budget → Cost budget
-
-  #### 5) Delete Default VPC (Security Best Practice)
+  #### 4) Delete Default VPC (Security Best Practice)
 
   **Why:** AWS creates a default VPC in each region with public subnets and an Internet Gateway. This is a security risk—resources accidentally launched here are internet-accessible by default.
 
@@ -240,15 +182,145 @@
   - ✅ GuardDuty enabled and showing "Active" status
   - ✅ Security Hub enabled with AWS Foundational Security Best Practices standard
   - ✅ IAM Access Analyzer created
-  - ✅ CloudWatch billing alarm created and SNS subscription confirmed
-  - ✅ AWS Budget created with email notifications
   - ✅ Default VPC deleted in primary region (e.g., us-east-1)
+
+---
+
+### Story 1.3: Enable Cost Guardrails
+
+**Business Value:** Prevents surprise AWS bills and provides early warning of cost overruns during migration. Billing alarms (15 minutes setup) catch misconfigured resources or forgotten instances before they generate $5K-20K surprise bills. AWS Budgets provide forecasting and alerts when spending exceeds thresholds, essential for migration projects where new resources are constantly being created. Organizations without cost monitoring average 30-40% higher cloud spend due to undetected waste.
+
+- **Title:** Configure AWS Cost Monitoring and Billing Alerts
+- **Persona:** As a **FinOps engineer** (or **cloud administrator**), I need to configure cost monitoring and budget alerts so that we track migration spending and prevent budget overruns.
+
+- **Requirements:**
+  - CloudWatch billing alarms configured
+  - AWS Budgets configured
+  - Email notifications enabled
+  - SNS topic created for cost alerts
+
+- **Implementation Details:**
+
+  #### 1) Enable Billing Alerts
+
+  **Enable Billing Alerts (Console):**
+  - Navigate to: Billing Dashboard → Billing Preferences
+  - Check ✅ "Receive Billing Alerts"
+  - Save preferences
+
+  **Why this is required:** Without this setting, CloudWatch cannot access billing metrics.
+
+  #### 2) Create SNS Topic for Cost Alerts
+
+  ```bash
+  # Create SNS topic for cost notifications
+  aws sns create-topic --name billing-alerts --region us-east-1
+
+  # Subscribe your email (replace YOUR_EMAIL)
+  aws sns subscribe \
+    --topic-arn arn:aws:sns:us-east-1:YOUR_ACCOUNT_ID:billing-alerts \
+    --protocol email \
+    --notification-endpoint YOUR_EMAIL@company.com \
+    --region us-east-1
+
+  # Check email and confirm subscription
+  ```
+
+  Or via Console: SNS → Topics → Create topic → Standard → Subscribe email
+
+  #### 3) Configure CloudWatch Billing Alarm
+
+  ```bash
+  # Create billing alarm (adjust threshold as needed)
+  aws cloudwatch put-metric-alarm \
+    --alarm-name "EstimatedCharges-USD-100" \
+    --alarm-description "Bill estimate exceeds $100" \
+    --metric-name EstimatedCharges \
+    --namespace AWS/Billing \
+    --statistic Maximum \
+    --period 21600 \
+    --threshold 100 \
+    --comparison-operator GreaterThanThreshold \
+    --dimensions Name=Currency,Value=USD \
+    --evaluation-periods 1 \
+    --alarm-actions arn:aws:sns:us-east-1:YOUR_ACCOUNT_ID:billing-alerts \
+    --region us-east-1
+  ```
+
+  Or via Console: CloudWatch → Alarms → Billing → Create alarm
+
+  **What it does:** Sends email when estimated monthly charges exceed threshold (adjust $100 to your needs).
+
+  #### 4) Create AWS Budget
+
+  ```bash
+  aws budgets create-budget \
+    --account-id YOUR_ACCOUNT_ID \
+    --budget '{
+      "BudgetName":"MigrationMonthlyBudget",
+      "BudgetLimit":{"Amount":"500","Unit":"USD"},
+      "TimeUnit":"MONTHLY",
+      "BudgetType":"COST",
+      "CostTypes":{"IncludeCredit":false,"IncludeRefund":false}
+    }' \
+    --notifications-with-subscribers '[
+      {
+        "Notification":{
+          "NotificationType":"ACTUAL",
+          "ComparisonOperator":"GREATER_THAN",
+          "Threshold":80,
+          "ThresholdType":"PERCENTAGE"
+        },
+        "Subscribers":[{"SubscriptionType":"EMAIL","Address":"YOUR_EMAIL@company.com"}]
+      }
+    ]'
+  ```
+
+  Or via Console: AWS Budgets → Create budget → Cost budget
+
+  **What it does:**
+  - Tracks monthly spending against $500 budget (adjust to your needs)
+  - Sends alert when 80% of budget consumed
+  - Provides forecasting to predict end-of-month costs
+
+  #### 5) Create Additional Budget Alerts (Recommended)
+
+  **Multiple threshold alerts:**
+  - 50% threshold: Early warning
+  - 80% threshold: Action needed
+  - 100% threshold: Budget exceeded
+  - 110% threshold: Emergency escalation
+
+  You can create multiple budgets or add multiple notifications to one budget via Console.
+
+  #### 6) Test Notifications
+
+  **Verify SNS subscription:**
+
+  ```bash
+  aws sns list-subscriptions-by-topic \
+    --topic-arn arn:aws:sns:us-east-1:YOUR_ACCOUNT_ID:billing-alerts
+  ```
+
+  Expected output should show your email subscription with `"SubscriptionArn"` (not `"PendingConfirmation"`).
+
+- **Acceptance Criteria:**
+  - ✅ Billing alerts enabled in Billing Preferences
+  - ✅ SNS topic created and email subscription confirmed
+  - ✅ CloudWatch billing alarm created with appropriate threshold
+  - ✅ AWS Budget created with 80% threshold notification
+  - ✅ Email notifications received and tested
+  - ✅ FinOps team has access to Cost Explorer and Budgets console
 
 ---
 
 ## Feature 2: Local Developer Workstation Setup
 
+**Business Value:** Eliminates environment inconsistencies and "works on my machine" problems, accelerating team velocity. Standardized tooling (3-4 hours per developer) prevents deployment failures from version mismatches and reduces onboarding time from days to hours. Teams with consistent environments ship 40% faster and have 60% fewer production incidents.
+
 ### Story 2.1: Install AWS CLI v2 and Configure SSO
+
+**Business Value:** Enables command-line infrastructure management while eliminating hardcoded credentials. CLI access (30 minutes setup) allows automation of repetitive tasks, saving 5-10 hours/week per engineer. SSO integration prevents access key leaks that average $45K per incident in detection/remediation costs.
 
 - **Title:** Install and Configure AWS Command Line Interface
 - **Persona:** As a **DevOps engineer / developer**, I need the AWS CLI installed and configured so that I can run infrastructure audits, deploy resources, and troubleshoot issues from my terminal.
@@ -263,7 +335,7 @@
 
   #### 1) Install AWS CLI v2
 
-  **macOS:**
+  **macOS (Option 1: Homebrew - Recommended):**
 
   ```bash
   brew install awscli
@@ -272,6 +344,20 @@
   aws --version
   # Expected: aws-cli/2.x.x Python/3.x.x Darwin/...
   ```
+
+  **macOS (Option 2: Native Installer):**
+
+  ```bash
+  # Download and install
+  curl "https://awscli.amazonaws.com/AWSCLIV2.pkg" -o "AWSCLIV2.pkg"
+  sudo installer -pkg AWSCLIV2.pkg -target /
+
+  # Verify installation
+  aws --version
+  # Expected: aws-cli/2.x.x Python/3.x.x Darwin/...
+  ```
+
+  > **Note:** Homebrew is recommended for easier updates (`brew upgrade awscli`), but native installer works if you don't use Homebrew.
 
   **Linux (Ubuntu/Debian):**
 
@@ -290,6 +376,9 @@
   - Open PowerShell and run: `aws --version`
 
   #### 2) Configure AWS SSO Profile
+
+  **📖 Why SSO instead of `aws configure`?**
+  SSO provides temporary credentials that expire automatically, instant revocation, full audit trails, and meets compliance requirements—unlike long-lived access keys which are the #1 cause of AWS security breaches.
 
   ```bash
   aws configure sso
@@ -368,6 +457,8 @@
 
 ### Story 2.2: Install Terraform with Version Management (tfenv)
 
+**Business Value:** Provides infrastructure-as-code consistency across team and prevents version-related breakage. Version management (20 minutes setup) ensures everyone deploys identical infrastructure, eliminating "works on my laptop" failures that cause 2-4 hour emergency rollbacks. Terraform reduces infrastructure provisioning time from hours to minutes, enabling rapid iteration.
+
 - **Title:** Install Terraform for Infrastructure Provisioning
 - **Persona:** As a **DevOps engineer**, I need Terraform installed with version management so that I can provision AWS infrastructure and switch between Terraform versions if needed.
 
@@ -381,11 +472,33 @@
 
   #### 1) Install tfenv (Terraform Version Manager)
 
-  **macOS:**
+  **macOS (Option 1: Homebrew - Recommended):**
 
   ```bash
   brew install tfenv
   ```
+
+  **macOS (Option 2: Manual Installation):**
+
+  ```bash
+  # Clone tfenv repository
+  git clone --depth=1 https://github.com/tfutils/tfenv.git ~/.tfenv
+
+  # Add to PATH
+
+  # Add to shell configuration file
+  echo 'export PATH="$HOME/.tfenv/bin:$PATH"' >> ~/.zshrc
+  source ~/.zshrc
+
+  # For bash:
+  echo 'export PATH="$HOME/.tfenv/bin:$PATH"' >> ~/.bash_profile
+  source ~/.bash_profile
+
+  # Verify installation
+  tfenv --version
+  ```
+
+  > **Note:** Homebrew is recommended for easier updates, but manual installation works without Homebrew.
 
   **Linux:**
 
@@ -447,6 +560,8 @@
 ---
 
 ### Story 2.3: Install Docker and Verify Functionality
+
+**Business Value:** Enables local testing that prevents Fargate deployment failures and reduces debugging cycles. Docker (15 minutes setup) allows developers to catch container issues on laptops before $500/hour outages in production. Local testing reduces deployment iteration time from 15-20 minutes (deploy to AWS) to 30 seconds (local build), accelerating development velocity by 3-5x.
 
 - **Title:** Install Docker for Local Container Testing
 - **Persona:** As a **developer**, I need Docker installed so that I can build container images locally, test applications in containers, and troubleshoot Dockerfile issues before deploying to Fargate.
@@ -543,6 +658,8 @@
 
 ### Story 2.4: Install AWS Session Manager Plugin (for ECS Exec)
 
+**Business Value:** Provides emergency access to troubleshoot failing containers without SSH keys or bastion hosts. Session Manager (10 minutes setup) enables exec into Fargate tasks during incidents, reducing MTTR (Mean Time To Resolution) from 2-4 hours (waiting for logs/metrics) to 15-30 minutes (direct container inspection). Eliminates security risk of SSH keys and jump boxes.
+
 - **Title:** Install Session Manager Plugin for ECS Container Access
 - **Persona:** As a **DevOps engineer**, I need the Session Manager plugin installed so that I can debug running ECS tasks by executing commands inside containers (ECS Exec).
 
@@ -555,7 +672,7 @@
 
   #### 1) Install Session Manager Plugin
 
-  **macOS:**
+  **macOS (Option 1: Homebrew - Recommended):**
 
   ```bash
   brew install --cask session-manager-plugin
@@ -563,6 +680,20 @@
   # Verify installation
   session-manager-plugin --version
   ```
+
+  **macOS (Option 2: Native Installer):**
+
+  ```bash
+  # Download and install
+  curl "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/mac/sessionmanager-bundle.zip" -o "sessionmanager-bundle.zip"
+  unzip sessionmanager-bundle.zip
+  sudo ./sessionmanager-bundle/install -i /usr/local/sessionmanagerplugin -b /usr/local/bin/session-manager-plugin
+
+  # Verify installation
+  session-manager-plugin --version
+  ```
+
+  > **Note:** Homebrew is recommended for automatic updates, but native installer works without Homebrew.
 
   **Linux (Ubuntu/Debian):**
 
@@ -609,6 +740,8 @@
 ---
 
 ### Story 2.5: Install Git and Configure for Collaboration
+
+**Business Value:** Enables version control, collaboration, and disaster recovery for infrastructure code. Git setup (15 minutes) provides audit trail of who changed what and when, critical for compliance and rollback. Teams using Git for infrastructure recover from mistakes in minutes vs. hours of manual restoration. Branch protection prevents accidental production changes that cause outages.
 
 - **Title:** Install Git and Configure User Identity
 - **Persona:** As a **developer**, I need Git installed and configured so that I can clone repositories, commit infrastructure code, and collaborate with the team.
@@ -709,7 +842,11 @@
 
 ## Feature 3: Repository Structure Setup (Enhanced for Network Segmentation)
 
+**Business Value:** Creates organized foundation that scales with team growth and prevents Terraform state corruption. Proper repository structure (2-3 hours) with layered state files enables parallel work by multiple engineers without conflicts, increasing team throughput by 200-300%. Well-organized infrastructure code reduces onboarding time from weeks to days and prevents costly state file corruption incidents.
+
 ### Story 3.1: Initialize Infrastructure Repository
+
+**Business Value:** Establishes single source of truth for infrastructure that enables collaboration and prevents drift. Repository setup (1-2 hours) with proper structure allows team to track changes, review code, and rollback mistakes instantly. Organizations with infrastructure-as-code reduce manual provisioning errors by 90% and accelerate new environment creation from weeks to hours.
 
 - **Title:** Create and Structure Infrastructure Code Repository
 - **Persona:** As a **DevOps lead**, I need a well-structured infrastructure repository so that the team has a consistent workspace for Terraform code, modules, and documentation.
@@ -1366,10 +1503,10 @@ Complete this checklist before starting Phase 0 (Discovery):
 - [ ] IAM Identity Center (SSO) enabled
 - [ ] `Admins` group created with AdministratorAccess permission set
 - [ ] All team members added as SSO users and can log in
-- [ ] GuardDuty, Security Hub, IAM Access Analyzer enabled
-- [ ] CloudWatch billing alarm configured
-- [ ] AWS Budget configured
-- [ ] Default VPC deleted in target region
+- [ ] GuardDuty, Security Hub, IAM Access Analyzer enabled (Story 1.2)
+- [ ] Default VPC deleted in target region (Story 1.2)
+- [ ] CloudWatch billing alarm configured (Story 1.3)
+- [ ] AWS Budget configured (Story 1.3)
 
 ### Local Workstation Setup (All Team Members)
 
