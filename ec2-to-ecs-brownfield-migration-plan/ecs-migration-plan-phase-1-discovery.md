@@ -22,6 +22,7 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 - **Requirements:**
   - At least two public subnets (for ALB) across different Availability Zones
   - At least two private subnets (for Fargate tasks) across different Availability Zones
+  - **Sufficient IP addresses in subnets to support task scaling**
   - Internet Gateway attached to VPC
   - NAT Gateway (or alternative) for private subnet internet access
   - Route tables configured correctly
@@ -35,6 +36,44 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
     - Check: Subnets with NO direct route to Internet Gateway
     - Why: Best practice—Fargate tasks should not have public IPs
     - Tasks here cannot be directly reached from the internet
+  - **IP Address Requirements (The Hidden Capacity Trap):**
+    - **The Problem:** Each Fargate task gets its own ENI (Elastic Network Interface) and consumes an IP address from the subnet
+    - **The Symptom:** Tasks fail with "ResourceInitializationError: unable to pull secrets or registry auth" or stuck in PENDING even though everything else is configured correctly
+    - **Root Cause:** Subnet ran out of available IPs
+    - **AWS IP Reservations:** First 4 IPs and last IP in each subnet are reserved by AWS (unusable)
+      - Example: `/28` subnet (16 IPs) → Only 11 IPs available for tasks
+      - Example: `/24` subnet (256 IPs) → 251 IPs available for tasks
+    - **Calculate Required IPs:**
+
+      ```
+      Required IPs = (Max tasks per service × Number of services) × 2
+
+      Why ×2? Rolling deployments run new tasks BEFORE stopping old ones
+      Example: Service with 10 tasks deploying new version = 20 IPs during rollout
+      ```
+
+    - **Common Subnet Sizing:**
+      | CIDR Block | Total IPs | Usable IPs | Recommended For |
+      |------------|-----------|------------|-----------------|
+      | `/28` | 16 | 11 | ❌ Too small - avoid |
+      | `/27` | 32 | 27 | ⚠️ Dev/test only (max ~10 tasks) |
+      | `/26` | 64 | 59 | ⚠️ Small production (max ~25 tasks) |
+      | `/25` | 128 | 123 | ✅ Medium production (max ~60 tasks) |
+      | `/24` | 256 | 251 | ✅ Recommended for production |
+      | `/23` | 512 | 507 | ✅ Large production with growth room |
+
+    - **Check Current Subnet Size:**
+      ```bash
+      aws ec2 describe-subnets --subnet-ids subnet-xxx \
+        --query 'Subnets[*].[SubnetId,CidrBlock,AvailableIpAddressCount]' \
+        --output table
+      ```
+    - **If Subnet is Too Small:**
+      - **Option 1:** Create new larger subnets, migrate gradually
+      - **Option 2:** Use multiple subnets per AZ (ECS can use all subnets you specify)
+      - **Option 3:** Reduce desired task count or consolidate services
+    - **Best Practice:** Use `/24` or larger for private subnets running Fargate tasks
+
   - **NAT Gateway (The Hidden Cost Trap):**
     - The Problem: Private subnet tasks have no internet access—they cannot pull Docker images from ECR
     - The Symptom: Tasks stuck in `PENDING` forever, then fail with "CannotPullContainerError"
@@ -46,6 +85,9 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 - **Acceptance Criteria:**
   - ✅ VPC has at least 2 public subnets in different AZs
   - ✅ VPC has at least 2 private subnets in different AZs
+  - ✅ **Each subnet has sufficient IP addresses (at least /24 recommended for production)**
+  - ✅ **Available IP count per subnet documented**
+  - ✅ **Maximum task capacity calculated: (Available IPs ÷ 2) per subnet**
   - ✅ Private subnets can reach the internet (via NAT or public IP assignment)
   - ✅ Decision documented: NAT Gateway vs Public IP vs VPC Endpoints
 
@@ -124,6 +166,81 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 ## Feature 2: Security Group Planning
 
 **Business Value:** Prevents database connection failures on day one of migration, avoiding emergency troubleshooting during critical cutover windows. Planning security groups correctly upfront (2-3 hours) vs. debugging connection failures in production (4-8 hours downtime) protects revenue and customer trust. Proper least-privilege design also reduces security audit findings.
+
+### Story 2.0: Discover and Inventory Data Stores
+
+- **Title:** Identify All RDS, ElastiCache, and Other Data Stores
+- **Persona:** As a **DevOps engineer**, I need to discover all databases and caches in the AWS account so that I understand what data stores the application depends on and can plan network/security configurations.
+
+- **Requirements:**
+  - Discover all RDS instances in the account/region
+  - Discover all ElastiCache clusters in the account/region
+  - Determine which data stores are used by the application being migrated
+  - Document connection details and VPC placement
+  - Identify any other data stores (DocumentDB, DynamoDB, OpenSearch, etc.)
+
+- **Implementation Details:**
+  - **Discover RDS instances:**
+
+    ```bash
+    # List all RDS instances
+    aws rds describe-db-instances \
+      --query 'DBInstances[*].[DBInstanceIdentifier,Engine,EngineVersion,DBInstanceClass,Endpoint.Address,DBSubnetGroup.VpcId,DBInstanceStatus]' \
+      --output table
+
+    # Get detailed info for specific instance
+    aws rds describe-db-instances \
+      --db-instance-identifier <your-db-name>
+    ```
+
+  - **Discover ElastiCache clusters:**
+
+    ```bash
+    # List Redis clusters
+    aws elasticache describe-cache-clusters \
+      --query 'CacheClusters[*].[CacheClusterId,Engine,EngineVersion,CacheNodeType,ConfigurationEndpoint.Address,CacheSubnetGroupName]' \
+      --output table
+
+    # Get subnet group details (shows VPC)
+    aws elasticache describe-cache-subnet-groups \
+      --cache-subnet-group-name <subnet-group-name>
+    ```
+
+  - **For each data store, document:**
+    - **Resource ID/Name**: What it's called in AWS
+    - **Type**: RDS (Postgres/MySQL/etc.), ElastiCache (Redis/Memcached), etc.
+    - **VPC ID**: Which VPC is it in?
+    - **Subnet Group**: Which subnets does it span?
+    - **Endpoint**: Connection string/hostname
+    - **Port**: Default or custom port
+    - **Used by which app(s)**: Which application(s) connect to it?
+    - **Purpose**: What's it used for? (user data, sessions, cache, etc.)
+  - **Determine if the data store will be used by Fargate:**
+    - Check application code/config for database connections
+    - Check `.env` files or environment variables for `DATABASE_URL`, `REDIS_URL`, etc.
+    - SSH to EC2 and check: `netstat -tn | grep :5432` (Postgres), `grep :6379` (Redis)
+  - **Cross-VPC scenarios:**
+    - If data store is in a different VPC than where Fargate will run:
+      - **Option 1:** Use VPC Peering to connect the VPCs
+      - **Option 2:** Migrate data store to same VPC (complex, requires downtime planning)
+      - **Option 3:** Use AWS PrivateLink (if applicable)
+    - Document this as a blocker requiring resolution in Phase 2
+  - **Other data stores to check:**
+    - **DynamoDB**: `aws dynamodb list-tables` (VPC endpoints may be needed for private subnets)
+    - **DocumentDB**: `aws docdb describe-db-clusters`
+    - **OpenSearch**: `aws opensearch list-domain-names`
+    - **S3**: `aws s3 ls` (check if app reads/writes to specific buckets)
+
+- **Acceptance Criteria:**
+  - ✅ All RDS instances discovered and documented
+  - ✅ All ElastiCache clusters discovered and documented
+  - ✅ Each data store's VPC placement verified
+  - ✅ Application dependencies on each data store documented
+  - ✅ Cross-VPC scenarios identified with resolution plan
+  - ✅ Other data stores (DynamoDB, S3, OpenSearch, etc.) inventoried
+  - ✅ Connection endpoints and ports documented for Phase 1 app configuration
+
+---
 
 ### Story 2.1: Audit Database Security Groups
 
