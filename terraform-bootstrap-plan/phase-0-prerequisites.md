@@ -453,7 +453,7 @@ aws configure sso
 
 ```
 SSO session name (Recommended): scale
-SSO start URL [None]: https://scale-solutions.awsapps.com/start
+SSO start URL [None]: https://d-xxxxx.awsapps.com/start
 SSO region [None]: us-east-1
 SSO registration scopes [None]: sso:account:access
 ```
@@ -466,9 +466,8 @@ SSO registration scopes [None]: sso:account:access
 
 There are 3 AWS accounts available to you.
 
-> mycompany-poc (123456789012)
-> scale-dev (234567890123)
-> scale-prod (345678901234)
+> mycompany-dev (234567890123)
+> mycompany-prod (345678901234)
 
 ```
 
@@ -487,25 +486,25 @@ There are 3 AWS accounts available to you.
 
 CLI default client Region [None]: us-east-1
 CLI default output format [None]: json
-CLI profile name [AdministratorAccess-123456789012]: mycompany-poc
+CLI profile name [AdministratorAccess-123456789012]: mycompany-dev
 
-````
+```
 
 ### Configure Additional Profiles (Dev, Prod)
 
 Repeat for each account:
 
 ```bash
-aws configure sso --profile scale-dev
-# Use the same SSO session: scale
-# Select scale-dev account
-# Profile name: scale-dev
+aws configure sso --profile mycompany-dev
+# Use the same SSO session: mycompany
+# Select mycompany-dev account
+# Profile name: mycompany-dev
 
-aws configure sso --profile scale-prod
-# Use the same SSO session: scale
-# Select scale-prod account
-# Profile name: scale-prod
-````
+aws configure sso --profile mycompany-prod
+# Use the same SSO session: mycompany
+# Select mycompany-prod account
+# Profile name: mycompany-prod
+```
 
 ### Verify SSO Configuration
 
@@ -517,29 +516,23 @@ cat ~/.aws/config
 **Expected output:**
 
 ```ini
-[profile mycompany-poc]
-sso_session = scale
-sso_account_id = 123456789012
-sso_role_name = AdministratorAccess
-region = us-east-1
-output = json
 
-[profile scale-dev]
-sso_session = scale
+[profile mycompany-dev]
+sso_session = mycompany
 sso_account_id = 234567890123
 sso_role_name = AdministratorAccess
 region = us-east-1
 output = json
 
-[profile scale-prod]
-sso_session = scale
+[profile mycompany-prod]
+sso_session = mycompany
 sso_account_id = 345678901234
 sso_role_name = AdministratorAccess
 region = us-east-1
 output = json
 
-[sso-session scale]
-sso_start_url = https://scale.awsapps.com/start
+[sso-session mycompany]
+sso_start_url = https://d-xxxx.awsapps.com/start
 sso_region = us-east-1
 sso_registration_scopes = sso:account:access
 ```
@@ -551,7 +544,7 @@ sso_registration_scopes = sso:account:access
 ### Login to AWS SSO (All Platforms)
 
 ```bash
-aws sso login --profile mycompany-poc
+aws sso login --profile mycompany-dev
 ```
 
 **Expected behavior:**
@@ -566,16 +559,16 @@ aws sso login --profile mycompany-poc
 
 ```bash
 # Test POC account
-aws sts get-caller-identity --profile mycompany-poc
+aws sts get-caller-identity --profile mycompany-dev
 ```
 
 **Expected output:**
 
 ```json
 {
-  "UserId": "AROAXXXXXXXXXXXXXXXXX:user@scale.com",
+  "UserId": "AROAXXXXXXXXXXXXXXXXX:user@mycompany.com",
   "Account": "123456789012",
-  "Arn": "arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_AdministratorAccess_xxxxx/user@scale.com"
+  "Arn": "arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_AdministratorAccess_xxxxx/user@mycompany.com"
 }
 ```
 
@@ -583,7 +576,7 @@ aws sts get-caller-identity --profile mycompany-poc
 
 ```bash
 # Test each profile
-for profile in mycompany-poc scale-dev scale-prod; do
+for profile in mycompany-dev scale-dev scale-prod; do
   echo "Testing $profile..."
   aws sts get-caller-identity --profile $profile --query 'Account' --output text
 done
@@ -592,11 +585,9 @@ done
 **Expected output:**
 
 ```
-Testing mycompany-poc...
+Testing mycompany-dev...
 123456789012
-Testing scale-dev...
-234567890123
-Testing scale-prod...
+Testing mycompany-prod...
 345678901234
 ```
 
@@ -610,7 +601,7 @@ To avoid typing `--profile` on every command, set a default.
 
 ```bash
 # Add to ~/.zshrc (macOS default) or ~/.bashrc (Linux)
-echo 'export AWS_PROFILE=mycompany-poc' >> ~/.zshrc
+echo 'export AWS_PROFILE=mycompany-dev' >> ~/.zshrc
 
 # Reload shell
 source ~/.zshrc  # or source ~/.bashrc
@@ -620,7 +611,7 @@ source ~/.zshrc  # or source ~/.bashrc
 
 ```powershell
 # Add to PowerShell profile
-Add-Content $PROFILE "`n`$env:AWS_PROFILE='mycompany-poc'"
+Add-Content $PROFILE "`n`$env:AWS_PROFILE='mycompany-dev'"
 
 # Reload profile (or restart PowerShell)
 . $PROFILE
@@ -630,17 +621,17 @@ Add-Content $PROFILE "`n`$env:AWS_PROFILE='mycompany-poc'"
 
 ```cmd
 # Set for current session only
-set AWS_PROFILE=mycompany-poc
+set AWS_PROFILE=mycompany-dev
 
 # Set permanently
-setx AWS_PROFILE mycompany-poc
+setx AWS_PROFILE mycompany-dev
 ```
 
 **Verify default profile (All Platforms):**
 
 ```bash
 aws sts get-caller-identity
-# Should use mycompany-poc without --profile flag
+# Should use mycompany-dev without --profile flag
 ```
 
 ---
@@ -794,13 +785,13 @@ git config --global user.email
 
 ```bash
 # Verify SSO login
-aws sso login --profile mycompany-poc
+aws sso login --profile mycompany-dev
 
 # Verify API access
-aws sts get-caller-identity --profile mycompany-poc
+aws sts get-caller-identity --profile mycompany-dev
 
 # Verify S3 access (should list buckets or return empty array)
-aws s3 ls --profile mycompany-poc
+aws s3 ls --profile mycompany-dev
 ```
 
 **Expected:** No authentication errors, account ID matches your POC account.
@@ -831,7 +822,7 @@ rm -rf ~/.aws/sso/cache/
 rm -rf ~/.aws/cli/cache/
 
 # Re-login
-aws sso login --profile mycompany-poc
+aws sso login --profile mycompany-dev
 ```
 
 **Solution (Windows):**
@@ -842,7 +833,7 @@ Remove-Item -Recurse -Force "$env:USERPROFILE\.aws\sso\cache\"
 Remove-Item -Recurse -Force "$env:USERPROFILE\.aws\cli\cache\"
 
 # Re-login
-aws sso login --profile mycompany-poc
+aws sso login --profile mycompany-dev
 ```
 
 ### Issue: Terraform command not found after installation
@@ -874,26 +865,26 @@ $env:PATH -split ';' | Select-String terraform
 where.exe terraform
 ```
 
-### Issue: AWS CLI returns "The config profile (mycompany-poc) could not be found"
+### Issue: AWS CLI returns "The config profile (mycompany-dev) could not be found"
 
 **Solution (macOS/Linux):**
 
 ```bash
 # Verify profile exists
-cat ~/.aws/config | grep mycompany-poc
+cat ~/.aws/config | grep mycompany-dev
 
 # If missing, reconfigure:
-aws configure sso --profile mycompany-poc
+aws configure sso --profile mycompany-dev
 ```
 
 **Solution (Windows):**
 
 ```powershell
 # Verify profile exists
-Get-Content "$env:USERPROFILE\.aws\config" | Select-String mycompany-poc
+Get-Content "$env:USERPROFILE\.aws\config" | Select-String mycompany-dev
 
 # If missing, reconfigure:
-aws configure sso --profile mycompany-poc
+aws configure sso --profile mycompany-dev
 ```
 
 ### Issue: SSO session expires frequently
@@ -903,7 +894,7 @@ aws configure sso --profile mycompany-poc
 ```bash
 # Sessions expire after 8 hours by default
 # Just re-login when prompted:
-aws sso login --profile mycompany-poc
+aws sso login --profile mycompany-dev
 
 # Or extend session duration (if your org allows):
 # Edit ~/.aws/config (macOS/Linux) or %USERPROFILE%\.aws\config (Windows)
@@ -936,7 +927,7 @@ Set-Service -Name ssh-agent -StartupType Automatic
 
 ```bash
 # If you see: "The SSO session associated with this profile has expired..."
-aws sso login --profile mycompany-poc
+aws sso login --profile mycompany-dev
 ```
 
 **How often?**
