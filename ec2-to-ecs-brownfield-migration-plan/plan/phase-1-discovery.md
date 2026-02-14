@@ -268,7 +268,7 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 
 ---
 
-### Story 2.2: Audit Redis/ElastiCache Security Groups
+### Story 2.2: Audit ElastiCache Security Groups
 
 **Business Value:** Protects user experience by ensuring session storage works correctly. Failed Redis connections cause users to be logged out unexpectedly, resulting in support tickets, abandoned transactions, and negative reviews. Planning this correctly prevents customer churn during migration.
 
@@ -748,7 +748,7 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 
 ---
 
-## Feature 9: Existing Infrastructure Inventory
+## Feature 9: Inventory Existing Infrastructure
 
 **Business Value:** Prevents forgotten services from breaking during migration, protecting uptime and user experience. Cron jobs, background workers, and monitoring agents often run on EC2 but aren't documented—migrating without accounting for them causes silent failures (reports don't generate, alerts don't fire, jobs don't run). 3-4 hours of inventory prevents weeks of "why isn't X working?" troubleshooting post-migration.
 
@@ -818,7 +818,7 @@ This phase identifies blockers and informs implementation decisions for Phase 1 
 - **Title:** Document Current Logging Configuration and Downstream Dependencies
 - **Persona:** As a **DevOps engineer**, I need to understand how logs are currently written, stored, and consumed so that I can ensure logging continues to work on both EC2 and ECS during migration.
 
-- **Requirements:\*\***
+- **Requirements:**
   - Document where application logs are written today
   - Identify any systems that read/scrape/ship these logs
   - Understand log retention and rotation policies
