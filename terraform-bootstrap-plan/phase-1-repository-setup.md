@@ -2,7 +2,7 @@
 
 ## Overview
 
-**Before deploying state infrastructure**, you need to create the repository structure and reusable Terraform module. This phase establishes the foundation for bootstrapping POC, Dev, and Prod accounts.
+**Before deploying state infrastructure**, you need to create the repository structure and reusable Terraform module. This phase establishes the foundation for bootstrapping Dev and Prod accounts.
 
 **Duration:** 1-2 hours
 
@@ -31,7 +31,7 @@
   # Using GitHub CLI
   gh repo create scale/scale.infra-terraform-bootstrap \
     --private \
-    --description "Terraform state backend bootstrap for POC/Dev/Prod accounts"
+    --description "Terraform state backend bootstrap for Dev/Prod accounts"
 
   # Or create via GitHub web UI:
   # - Navigate to github.com/scale
@@ -51,7 +51,7 @@
 
   ```bash
   mkdir -p modules/terraform-state-backend
-  mkdir -p accounts/{poc,dev,prod}
+  mkdir -p accounts/{dev,prod}
 
   # Verify structure
   tree -L 2
@@ -238,12 +238,12 @@
   }
 
   variable "environment" {
-    description = "Environment name (poc, dev, prod)"
+    description = "Environment name (dev, prod)"
     type        = string
 
     validation {
-      condition     = contains(["poc", "dev", "prod"], var.environment)
-      error_message = "Environment must be one of: poc, dev, prod."
+      condition     = contains(["dev", "prod"], var.environment)
+      error_message = "Environment must be one of: dev, prod."
     }
   }
 
@@ -315,9 +315,9 @@
   module "terraform_backend" {
   source = "../../modules/terraform-state-backend"
 
-  bucket_name = "scale-terraform-state-poc"
+  bucket_name = "scale-terraform-state-dev"
   lock_table_name = "scale-terraform-locks"
-  environment = "poc"
+  environment = "dev"
 
   common_tags = {
   ManagedBy = "Terraform"
@@ -401,7 +401,7 @@
   cat > README.md << 'EOF'
   # Scale Terraform Bootstrap
 
-  **Purpose:** One-time setup to create Terraform state infrastructure (S3 + DynamoDB) for POC, Dev, and Prod AWS accounts.
+  **Purpose:** One-time setup to create Terraform state infrastructure (S3 + DynamoDB) for Dev and Prod AWS accounts.
 
   ## Overview
 
@@ -426,10 +426,10 @@
 
   ## Quick Start
 
-  ### 1. Bootstrap POC Account
+  ### 2. Bootstrap Dev Account
 
   ```bash
-  cd accounts/poc
+  cd accounts/dev
   cp terraform.tfvars.example terraform.tfvars
   vim terraform.tfvars  # Set aws_account_id
 
@@ -459,7 +459,7 @@
   ```hcl
   terraform {
     backend "s3" {
-      bucket         = "scale-terraform-state-poc"
+      bucket         = "scale-terraform-state-dev"
       key            = "{region}/{layer}/terraform.tfstate"
       region         = "us-east-1"
       encrypt        = true
@@ -470,8 +470,8 @@
 
   ## Documentation
   - [Phase 0: Repository Setup](phase-0-repository-setup.md)
-  - [Phase 1: Bootstrap POC Account](phase-1-bootstrap-poc.md)
-  - [Phase 2: Bootstrap Additional Accounts](phase-2-bootstrap-additional-accounts.md)
+  - [Phase 2: Bootstrap Dev Account](phase-2-bootstrap-dev.md)
+  - [Phase 3: Bootstrap Prod Account](phase-3-bootstrap-prod.md)
   - [Phase 3: Migrate to Remote State](phase-3-migrate-to-remote-state.md)
 
   ## Cost

@@ -8,9 +8,9 @@ Additional reference material for the Terraform bootstrap project.
 
 | Resource     | Pattern                        | Example                      |
 | ------------ | ------------------------------ | ---------------------------- |
-| State Bucket | `scale-terraform-state-{env}`  | `scale-terraform-state-poc`  |
+| State Bucket | `scale-terraform-state-{env}`  | `scale-terraform-state-dev`  |
 | Lock Table   | `scale-terraform-locks`        | `scale-terraform-locks`      |
-| IAM Policy   | `terraform-state-access-{env}` | `terraform-state-access-poc` |
+| IAM Policy   | `terraform-state-access-{env}` | `terraform-state-access-dev` |
 
 ---
 
@@ -73,14 +73,14 @@ State files contain **sensitive data**:
 ```bash
 # 1. Clone repository
 git clone git@github.com:scale/scale-terraform-bootstrap.git
-cd scale-terraform-bootstrap/accounts/poc
+cd scale-terraform-bootstrap/accounts/dev
 
 # 2. Pull latest state from Git
 git pull origin main
 # Local terraform.tfstate file is now current
 
 # 3. Configure AWS credentials
-export AWS_PROFILE=scale-poc
+export AWS_PROFILE=scale-dev
 aws sts get-caller-identity
 
 # 4. Make changes
@@ -130,10 +130,10 @@ git push origin main
 ```bash
 # 1. Clone repository
 git clone git@github.com:scale/scale.infra-terraform-bootstrap.git
-cd scale.infra-terraform-bootstrap/accounts/poc
+cd scale.infra-terraform-bootstrap/accounts/dev
 
 # 2. Configure AWS credentials
-export AWS_PROFILE=scale-poc
+export AWS_PROFILE=scale-dev
 aws sts get-caller-identity
 
 # 3. Initialize (downloads state from S3)
@@ -206,3 +206,499 @@ git push origin main
 - Need compliance audit trail
 
 **You can always migrate later** - Phase 3 can be completed months after initial bootstrap if needs change.
+
+---
+
+## Appendix E: Adding Prod Account After Starting with Dev
+
+**Scenario:** You bootstrapped the Dev account first and now have approval to create a Prod account.
+
+**Good News:** The migration path is straightforward because each AWS account's bootstrap infrastructure is completely independent.
+
+### Key Principles
+
+- **Account Isolation:** Each AWS account has its own S3 bucket and DynamoDB table
+- **No Dependencies:** Prod bootstrap doesn't depend on Dev infrastructure existing
+- **Same Process:** Use the exact same bootstrap process you used for Dev
+- **Zero Downtime:** Dev infrastructure continues working while you bootstrap Prod
+
+### Migration Steps
+
+1. **Ensure Dev is stable** - Verify Dev bootstrap is complete and working
+
+   ```bash
+   # In Dev account
+   aws s3 ls s3://scale-terraform-state-dev/
+   aws dynamodb describe-table --table-name scale-terraform-locks
+   ```
+
+2. **Bootstrap Prod account** - Follow [Phase 3: Bootstrap Prod Account](phase-3-bootstrap-prod.md)
+
+   ```bash
+   cd scale.infra-terraform-bootstrap/accounts
+   cp -r dev prod
+   cd prod
+   # Update terraform.tfvars with Prod account ID
+   # Switch to Prod AWS credentials
+   terraform init
+   terraform apply
+   ```
+
+3. **Verify isolation** - Confirm resources created in correct account
+
+   ```bash
+   # Check Prod resources
+   export AWS_PROFILE=scale-prod
+   aws s3 ls | grep scale-terraform-state-prod
+   aws dynamodb list-tables | grep scale-terraform-locks
+
+   # Verify Dev still intact
+   export AWS_PROFILE=scale-dev
+   aws s3 ls | grep scale-terraform-state-dev
+   ```
+
+4. **Update documentation** - Add Prod backend config to your runbooks
+   ```bash
+   cd scale.infra-terraform-bootstrap
+   terraform output backend_configuration > BACKEND_CONFIG_PROD.txt
+   ```
+
+### What About Existing Dev Infrastructure?
+
+**Nothing changes in Dev.** Your Dev infrastructure continues using:
+
+```hcl
+# Dev projects continue using this backend
+terraform {
+  backend "s3" {
+    bucket         = "scale-terraform-state-dev"  # Dev bucket unchanged
+    key            = "us-east-1/00-network/terraform.tfstate"
+    region         = "us-east-1"
+    encrypt        = true
+    dynamodb_table = "scale-terraform-locks"  # Dev lock table unchanged
+  }
+}
+```
+
+**New Prod projects use:**
+
+```hcl
+# New Prod projects use separate Prod bucket
+terraform {
+  backend "s3" {
+    bucket         = "scale-terraform-state-prod"  # Different bucket
+    key            = "us-east-1/00-network/terraform.tfstate"
+    region         = "us-east-1"
+    encrypt        = true
+    dynamodb_table = "scale-terraform-locks"  # Different table, same name
+  }
+}
+```
+
+### Common Questions
+
+**Q: Do I need to migrate Dev state somewhere?**  
+A: No. Dev state stays in the Dev account's S3 bucket. Prod will have its own separate bucket in the Prod account.
+
+**Q: Will bootstrapping Prod affect Dev workloads?**  
+A: No. The accounts are completely isolated. Prod bootstrap creates resources only in the Prod AWS account.
+
+**Q: Can I use the same repository?**  
+A: Yes! The `scale.infra-terraform-bootstrap` repository supports multiple accounts via the `accounts/` folder structure:
+
+```
+scale.infra-terraform-bootstrap/
+├── accounts/
+│   ├── dev/       # Dev account config (already exists)
+│   └── prod/      # Prod account config (create this)
+```
+
+**Q: What if we add more environments later (staging, qa, etc.)?**  
+A: Same process. Just copy the account folder structure, update the environment name and account ID, and bootstrap the new account. Each is independent.
+
+**Q: Do both accounts need the same S3 bucket configuration?**  
+A: Generally yes (versioning, encryption, lifecycle rules should match), but you can customize Prod with additional security controls like MFA delete or object lock if compliance requires.
+
+### Timeline
+
+| Activity                         | Duration    | When  |
+| -------------------------------- | ----------- | ----- |
+| Prod account approved            | -           | Day 0 |
+| Bootstrap Prod account           | 30-60 min   | Day 0 |
+| Verify Prod infrastructure       | 15 min      | Day 0 |
+| Begin using Prod for deployments | Immediately | Day 0 |
+
+**Total migration time:** ~1 hour, with no Dev downtime
+
+### Checklist
+
+Before bootstrapping Prod:
+
+- [ ] Dev bootstrap is complete and stable
+- [ ] Prod AWS account exists and you have admin access
+- [ ] AWS SSO profile configured for Prod account (`scale-prod`)
+- [ ] Repository has space for `accounts/prod/` folder
+
+After bootstrapping Prod:
+
+- [ ] S3 bucket `scale-terraform-state-prod` exists in Prod account
+- [ ] DynamoDB table `scale-terraform-locks` exists in Prod account
+- [ ] `BACKEND_CONFIG_PROD.txt` saved and shared with team
+- [ ] Verified no resources leaked into Dev account
+- [ ] Dev infrastructure still working normally
+
+---
+
+## Appendix F: State Storage Strategies
+
+**Question:** Should Terraform state be stored in the same account as the resources, or centralized in a single account (typically Prod)?
+
+**Answer:** Both approaches are valid. Choose based on your organization's priorities.
+
+---
+
+### Strategy 1: State in Same Account (Default Plan)
+
+**Architecture:**
+
+```
+Dev Account                      Prod Account
+├─ Dev Resources                 ├─ Prod Resources
+└─ Dev State Bucket              └─ Prod State Bucket
+   └─ Stores Dev resource state     └─ Stores Prod resource state
+```
+
+**How It Works:**
+
+- Dev engineers deploy to Dev account using Dev state bucket
+- Prod engineers deploy to Prod account using Prod state bucket
+- Each account's state is isolated within that account
+
+**Backend Configuration Example:**
+
+```hcl
+# Dev infrastructure project
+terraform {
+  backend "s3" {
+    bucket         = "scale-terraform-state-dev"  # In Dev account
+    key            = "us-east-1/vpc/terraform.tfstate"
+    region         = "us-east-1"
+    encrypt        = true
+    dynamodb_table = "scale-terraform-locks"
+  }
+}
+
+# Prod infrastructure project
+terraform {
+  backend "s3" {
+    bucket         = "scale-terraform-state-prod"  # In Prod account
+    key            = "us-east-1/vpc/terraform.tfstate"
+    region         = "us-east-1"
+    encrypt        = true
+    dynamodb_table = "scale-terraform-locks"
+  }
+}
+```
+
+#### Pros
+
+✅ **Account Isolation**
+
+- Dev account compromise doesn't expose Prod state
+- Blast radius limited to single account
+- Clear security boundary
+
+✅ **Independent Operations**
+
+- Dev team can deploy without Prod account access
+- Prod bucket outage doesn't block Dev work
+- No cross-account IAM complexity
+
+✅ **Simpler IAM**
+
+- Engineers only need permissions in accounts they manage
+- No AssumeRole or cross-account policies required
+- Easier to audit and troubleshoot
+
+✅ **Faster Deployments**
+
+- No cross-account API calls
+- Lower latency for state operations
+- Reduced AWS API throttling risk
+
+#### Cons
+
+❌ **Multiple Buckets to Manage**
+
+- Need to bootstrap each account
+- Separate backup/DR procedures per account
+- More infrastructure to maintain
+
+❌ **State in Lower-Security Accounts**
+
+- Dev state bucket has less strict controls than Prod
+- Dev engineers have write access to Dev state
+- Potential for accidental state corruption in Dev
+
+❌ **Harder Cross-Account References**
+
+- Can't easily use `terraform_remote_state` across accounts
+- Need to use SSM Parameter Store or data sources instead
+
+#### When to Use
+
+- **Small to medium teams** where simplicity matters
+- **Strong account isolation** is a priority
+- Dev and Prod managed by **different teams**
+- You want **independent failure domains**
+- Organization has **multiple AWS accounts** with different security postures
+
+---
+
+### Strategy 2: Centralized State in Prod
+
+**Architecture:**
+
+```
+Dev Account                      Prod Account
+├─ Dev Resources                 ├─ Prod Resources
+└─ (No state bucket)             ├─ Prod State Bucket
+                                 │  ├─ Prod resource state
+                                 │  └─ Dev resource state ←─┐
+                                 └────────────────────────────┘
+                                       ↑
+                                       │
+                        Dev engineers use cross-account access
+```
+
+**How It Works:**
+
+- Only Prod account has state infrastructure (S3 + DynamoDB)
+- Dev engineers assume role to access Prod state bucket
+- All state files stored centrally in the most secure account
+
+**Backend Configuration Example:**
+
+```hcl
+# Dev infrastructure project
+terraform {
+  backend "s3" {
+    bucket         = "scale-terraform-state-prod"  # In Prod account!
+    key            = "dev/us-east-1/vpc/terraform.tfstate"  # Separate prefix
+    region         = "us-east-1"
+    encrypt        = true
+    dynamodb_table = "scale-terraform-locks"
+    role_arn       = "arn:aws:iam::987654321098:role/dev-terraform-state-access"
+  }
+}
+
+# Prod infrastructure project
+terraform {
+  backend "s3" {
+    bucket         = "scale-terraform-state-prod"  # Same bucket
+    key            = "prod/us-east-1/vpc/terraform.tfstate"  # Different prefix
+    region         = "us-east-1"
+    encrypt        = true
+    dynamodb_table = "scale-terraform-locks"
+  }
+}
+```
+
+**Required IAM Setup:**
+
+```hcl
+# In Prod account: Create assumable role for Dev engineers
+resource "aws_iam_role" "dev_terraform_state_access" {
+  name = "dev-terraform-state-access"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::123456789012:root"  # Dev account
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+}
+
+# Attach policy allowing state bucket access
+resource "aws_iam_role_policy_attachment" "dev_state_access" {
+  role       = aws_iam_role.dev_terraform_state_access.name
+  policy_arn = aws_iam_policy.terraform_state_access.arn
+}
+
+# Update bucket policy to allow cross-account access
+resource "aws_s3_bucket_policy" "terraform_state" {
+  bucket = aws_s3_bucket.terraform_state.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowDevAccountAccess"
+        Effect = "Allow"
+        Principal = {
+          AWS = aws_iam_role.dev_terraform_state_access.arn
+        }
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject"
+        ]
+        Resource = "${aws_s3_bucket.terraform_state.arn}/dev/*"  # Limit to dev/ prefix
+      }
+    ]
+  })
+}
+```
+
+#### Pros
+
+✅ **Single Source of Truth**
+
+- All state in one highly-secured location
+- Simplified backup and disaster recovery
+- Easier to implement organization-wide state retention policies
+
+✅ **Enhanced Security**
+
+- State stored in the most secure account (Prod)
+- Dev account compromise doesn't expose state files
+- Prod security controls apply to all state
+
+✅ **Easier Cross-Account References**
+
+- Can use `terraform_remote_state` data source across environments
+- Simplified output sharing between Dev and Prod
+- Single bucket for state locking
+
+✅ **Simplified Infrastructure**
+
+- Only one state bucket to manage
+- Reduced bootstrap complexity (bootstrap Prod only)
+- Lower cost (one bucket vs multiple)
+
+#### Cons
+
+❌ **Complex IAM Setup**
+
+- Need cross-account AssumeRole policies
+- Bucket policies must allow cross-account access
+- More complex to troubleshoot permissions issues
+
+❌ **Prod Becomes Dependency**
+
+- Prod state bucket outage blocks all deployments
+- Dev engineers need (limited) access to Prod account
+- Creates coupling between environments
+
+❌ **Potential Security Concerns**
+
+- Dev engineers have IAM path to Prod account
+- Risk of misconfigured bucket policies exposing Prod state
+- Need careful IAM boundary management
+
+❌ **Slower Dev Deployments**
+
+- Cross-account API calls add latency
+- AssumeRole token expiration issues
+- Potential AWS API throttling
+
+#### When to Use
+
+- **Large enterprises** with dedicated security teams
+- **Strict compliance requirements** (SOC2, PCI-DSS, HIPAA)
+- You need **centralized audit logs** for all state changes
+- **Mature DevOps practice** comfortable with cross-account IAM
+- Organization prioritizes **security over independence**
+- Limited number of environments (2-3 max)
+
+---
+
+### Comparison Matrix
+
+| Factor                             | Same Account              | Centralized in Prod    |
+| ---------------------------------- | ------------------------- | ---------------------- |
+| **Setup Complexity**               | Low                       | Medium-High            |
+| **IAM Complexity**                 | Low                       | High                   |
+| **Security Posture**               | Account-isolated          | Centrally secured      |
+| **Blast Radius**                   | Limited to account        | All environments       |
+| **Dev Independence**               | ✅ Full                   | ❌ Depends on Prod     |
+| **Backup Strategy**                | Per-account               | Centralized            |
+| **Cross-Account State References** | ❌ Difficult              | ✅ Easy                |
+| **Troubleshooting**                | Easy                      | Complex (IAM paths)    |
+| **Cost**                           | Higher (multiple buckets) | Lower (single bucket)  |
+| **Deployment Speed**               | Fast                      | Slower (cross-account) |
+| **Best For**                       | Small-medium teams        | Large enterprises      |
+
+---
+
+### Decision Guide
+
+**Choose Same-Account Strategy (Default) if:**
+
+- ✅ Dev and Prod are managed by different teams
+- ✅ You want strong environment isolation
+- ✅ Your team is small-to-medium size (<20 engineers)
+- ✅ Simplicity and maintainability are priorities
+- ✅ Dev outages shouldn't affect Prod operations
+
+**Choose Centralized Strategy if:**
+
+- ✅ You have strict security/compliance requirements
+- ✅ You have a mature DevOps team comfortable with complex IAM
+- ✅ You need cross-environment state references
+- ✅ You want centralized state governance
+- ✅ You have dedicated security/compliance team
+
+---
+
+### Migration Between Strategies
+
+You can change strategies later if needs evolve:
+
+**Same-Account → Centralized:**
+
+1. Bootstrap Prod account
+2. Copy Dev state files from Dev bucket to Prod bucket (under `dev/` prefix)
+3. Update Dev backend configs to point to Prod bucket with `role_arn`
+4. Run `terraform init -migrate-state` in all Dev projects
+5. Verify state migration successful
+6. Delete Dev account state bucket
+
+**Centralized → Same-Account:**
+
+1. Bootstrap Dev account
+2. Copy Dev state files from Prod bucket to Dev bucket
+3. Update Dev backend configs to remove `role_arn` and use Dev bucket
+4. Run `terraform init -migrate-state` in all Dev projects
+5. Verify state migration successful
+6. Clean up cross-account IAM roles
+
+**Migration Time:** 2-4 hours per environment
+
+---
+
+### Recommendation
+
+**For Scale:** Start with **same-account strategy** (the current plan).
+
+**Rationale:**
+
+- Simpler to implement and understand
+- Easier for team to learn Terraform without IAM complexity
+- Provides strong isolation between Dev and Prod
+- Can migrate to centralized approach later if compliance requires it
+
+**Re-evaluate if:**
+
+- You achieve SOC2 or similar compliance certification
+- Team grows beyond 20 engineers
+- You need extensive cross-environment state references
+- Security team mandates centralized state governance
+
+---

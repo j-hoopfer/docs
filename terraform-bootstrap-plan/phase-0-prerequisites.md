@@ -453,16 +453,9 @@ aws configure sso
 
 ```
 SSO session name (Recommended): scale
-SSO start URL [None]: https://scale.awsapps.com/start
+SSO start URL [None]: https://scale-solutions.awsapps.com/start
 SSO region [None]: us-east-1
 SSO registration scopes [None]: sso:account:access
-```
-
-SSO session name (Recommended): scale
-SSO start URL [None]: https://scale.awsapps.com/start
-SSO region [None]: us-east-1
-SSO registration scopes [None]: sso:account:access
-
 ```
 
 **The browser will open** - Log in with your SSO credentials (e.g., Google Workspace).

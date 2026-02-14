@@ -1,32 +1,32 @@
-# Terraform Bootstrap - Phase 1: Bootstrap POC Account
+# Terraform Bootstrap - Phase 2: Bootstrap Dev Account
 
 ## Overview
 
-**Now that the repository structure exists**, deploy Terraform state infrastructure (S3 + DynamoDB) to the POC AWS account. This phase creates the foundation for remote state management.
+**Now that the repository structure exists**, deploy Terraform state infrastructure (S3 + DynamoDB) to the Dev AWS account. This phase creates the foundation for remote state management in your development environment.
 
 **Duration:** 30-60 minutes
 
-**Who Should Complete This:** Platform engineers with admin access to POC AWS account
+**Who Should Complete This:** Platform engineers with admin access to Dev AWS account
 
 ---
 
-## Feature 2: Bootstrap POC Account
+## Feature 2: Bootstrap Dev Account
 
-### Story 2.1: Create POC Account Configuration Files
+### Story 2.1: Create Dev Account Configuration Files
 
-- **Title:** Configure Terraform for POC Account Bootstrap
-- **Persona:** As a **Platform Engineer**, I need account-specific Terraform files for the POC environment so that I can create state infrastructure in the POC AWS account.
+- **Title:** Configure Terraform for Dev Account Bootstrap
+- **Persona:** As a **Platform Engineer**, I need account-specific Terraform files for the Dev environment so that I can create state infrastructure in the Dev AWS account.
 
 - **Requirements:**
   - `main.tf` calls state backend module
-  - `variables.tf` defines POC-specific variables
+  - `variables.tf` defines Dev-specific variables
   - `providers.tf` configures AWS provider (no backend yet)
   - `outputs.tf` displays backend configuration
   - `terraform.tfvars.example` provides template
 
 - **Implementation Details:**
 
-  #### 1) Create `accounts/poc/main.tf`
+  #### 1) Create `accounts/dev/main.tf`
 
   ```hcl
   module "terraform_backend" {
@@ -45,11 +45,11 @@
   }
   ```
 
-  #### 2) Create `accounts/poc/variables.tf`
+  #### 2) Create `accounts/dev/variables.tf`
 
   ```hcl
   variable "aws_account_id" {
-    description = "AWS Account ID for POC environment"
+    description = "AWS Account ID for Dev environment"
     type        = string
 
     validation {
@@ -61,7 +61,7 @@
   variable "environment" {
     description = "Environment name"
     type        = string
-    default     = "poc"
+    default     = "dev"
   }
 
   variable "primary_region" {
@@ -71,7 +71,7 @@
   }
   ```
 
-  #### 3) Create `accounts/poc/providers.tf`
+  #### 3) Create `accounts/dev/providers.tf`
 
   ```hcl
   terraform {
@@ -92,11 +92,11 @@
     region = var.primary_region
 
     # Uncomment if using AWS SSO profile
-    # profile = "scale-poc"
+    # profile = "scale-dev"
   }
   ```
 
-  #### 4) Create `accounts/poc/outputs.tf`
+  #### 4) Create `accounts/dev/outputs.tf`
 
   ```hcl
   output "backend_configuration" {
@@ -132,32 +132,32 @@
   }
   ```
 
-  #### 5) Create `accounts/poc/terraform.tfvars.example`
+  #### 5) Create `accounts/dev/terraform.tfvars.example`
 
   ```hcl
   # Copy this to terraform.tfvars and update with actual values
 
-  aws_account_id = "123456789012"  # Replace with POC account ID
-  environment    = "poc"
+  aws_account_id = "123456789012"  # Replace with Dev account ID
+  environment    = "dev"
   primary_region = "us-east-1"
   ```
 
 - **Acceptance Criteria:**
-  - ✅ `accounts/poc/main.tf` calls terraform-state-backend module
-  - ✅ `accounts/poc/variables.tf` includes validation for account ID
-  - ✅ `accounts/poc/providers.tf` has NO backend block
-  - ✅ `accounts/poc/outputs.tf` displays backend configuration
-  - ✅ `accounts/poc/terraform.tfvars.example` exists (not ignored by Git)
+  - ✅ `accounts/dev/main.tf` calls terraform-state-backend module
+  - ✅ `accounts/dev/variables.tf` includes validation for account ID
+  - ✅ `accounts/dev/providers.tf` has NO backend block
+  - ✅ `accounts/dev/outputs.tf` displays backend configuration
+  - ✅ `accounts/dev/terraform.tfvars.example` exists (not ignored by Git)
 
 ---
 
-### Story 2.2: Initialize and Apply POC Bootstrap
+### Story 2.2: Initialize and Apply Dev Bootstrap
 
-- **Title:** Deploy Terraform State Infrastructure in POC Account
-- **Persona:** As a **Platform Engineer**, I need to run Terraform to create the S3 bucket and DynamoDB table so that the POC account has state infrastructure ready.
+- **Title:** Deploy Terraform State Infrastructure in Dev Account
+- **Persona:** As a **Platform Engineer**, I need to run Terraform to create the S3 bucket and DynamoDB table so that the Dev account has state infrastructure ready.
 
 - **Requirements:**
-  - AWS credentials configured for POC account
+  - AWS credentials configured for Dev account
   - `terraform.tfvars` created from example
   - Terraform initialized with local backend
   - Resources created successfully
@@ -169,30 +169,30 @@
 
   ```bash
   # Option A: AWS SSO
-  aws sso login --profile scale-poc
-  export AWS_PROFILE=scale-poc
+  aws sso login --profile scale-dev
+  export AWS_PROFILE=scale-dev
 
   # Option B: Set profile in providers.tf
   # Uncomment the profile line in providers.tf
 
   # Verify credentials
   aws sts get-caller-identity
-  # Should show POC account ID
+  # Should show Dev account ID
   ```
 
   #### 2) Create `terraform.tfvars`
 
   ```bash
-  cd accounts/poc
+  cd accounts/dev
   cp terraform.tfvars.example terraform.tfvars
   vim terraform.tfvars
   ```
 
-  **Update with actual POC account ID:**
+  **Update with actual Dev account ID:**
 
   ```hcl
-  aws_account_id = "123456789012"  # Your actual POC account ID
-  environment    = "poc"
+  aws_account_id = "123456789012"  # Your actual Dev account ID
+  environment    = "dev"
   primary_region = "us-east-1"
   ```
 
@@ -257,7 +257,7 @@
 
   terraform {
     backend "s3" {
-      bucket         = "scale-terraform-state-poc"
+      bucket         = "scale-terraform-state-dev"
       key            = "{region}/{layer}/terraform.tfstate"
       region         = "us-east-1"
       encrypt        = true
@@ -265,22 +265,22 @@
     }
   }
   EOT
-  iam_policy_arn = "arn:aws:iam::123456789012:policy/terraform-state-access-poc"
+  iam_policy_arn = "arn:aws:iam::123456789012:policy/terraform-state-access-dev"
   lock_table = "scale-terraform-locks"
-  state_bucket = "scale-terraform-state-poc"
+  state_bucket = "scale-terraform-state-dev"
   ```
 
   #### 6) Capture Backend Configuration
 
   ```bash
-  terraform output backend_configuration > ../../BACKEND_CONFIG_POC.txt
+  terraform output backend_configuration > ../../BACKEND_CONFIG_DEV.txt
   ```
 
   #### 7) Verify Resources in AWS Console
 
   **S3 Bucket:**
   - Navigate to S3 → Buckets
-  - Find `scale-terraform-state-poc`
+  - Find `scale-terraform-state-dev`
   - Properties → Versioning: **Enabled**
   - Properties → Encryption: **Enabled (AES-256)**
 
@@ -291,13 +291,13 @@
   - Partition key: **LockID (String)**
 
 - **Technical Requirements:**
-  - AWS CLI configured with admin access to POC account
+  - AWS CLI configured with admin access to Dev account
   - Terraform 1.7.0+
   - Internet connectivity for provider downloads
 
 - **Acceptance Criteria:**
   - ✅ `terraform apply` completes without errors
-  - ✅ S3 bucket `scale-terraform-state-poc` exists
+  - ✅ S3 bucket `scale-terraform-state-dev` exists
   - ✅ Bucket has versioning enabled
   - ✅ Bucket has encryption enabled
   - ✅ DynamoDB table `scale-terraform-locks` exists with `LockID` key
@@ -334,7 +334,7 @@
   # main.tf
   terraform {
     backend "s3" {
-      bucket         = "scale-terraform-state-poc"
+      bucket         = "scale-terraform-state-dev"
       key            = "test/vpc/terraform.tfstate"
       region         = "us-east-1"
       encrypt        = true
@@ -407,11 +407,11 @@
   #### 5) Verify State in S3
 
   ```bash
-  aws s3 ls s3://scale-terraform-state-poc/test/vpc/
+  aws s3 ls s3://scale-terraform-state-dev/test/vpc/
   # Should show: terraform.tfstate
 
   # Download and inspect (optional)
-  aws s3 cp s3://scale-terraform-state-poc/test/vpc/terraform.tfstate /tmp/state.json
+  aws s3 cp s3://scale-terraform-state-dev/test/vpc/terraform.tfstate /tmp/state.json
   cat /tmp/state.json | jq '.resources[] | select(.type=="aws_vpc")'
   ```
 
@@ -434,7 +434,7 @@
   Error message: ConditionalCheckFailedException: The conditional request failed
   Lock Info:
     ID:        abc-123-xyz
-    Path:      scale-terraform-state-poc/test/vpc/terraform.tfstate
+    Path:      scale-terraform-state-dev/test/vpc/terraform.tfstate
     Operation: OperationTypePlan
     Who:       your-username@hostname
     ...
@@ -446,7 +446,7 @@
   terraform destroy -auto-approve
 
   # Delete state file from S3
-  aws s3 rm s3://scale-terraform-state-poc/test/vpc/terraform.tfstate
+  aws s3 rm s3://scale-terraform-state-dev/test/vpc/terraform.tfstate
 
   # Remove test directory
   cd ~
@@ -463,23 +463,23 @@
 
 ---
 
-## Phase 1 Checklist
+## Phase 2 Checklist
 
-Complete this checklist before proceeding to Phase 2:
+Complete this checklist before proceeding to Phase 3:
 
-- [ ] `accounts/poc/` configuration files created
-- [ ] `terraform.tfvars` created with actual POC account ID
-- [ ] AWS credentials verified for POC account
+- [ ] `accounts/dev/` configuration files created
+- [ ] `terraform.tfvars` created with actual Dev account ID
+- [ ] AWS credentials verified for Dev account
 - [ ] `terraform apply` completed successfully
-- [ ] S3 bucket `scale-terraform-state-poc` exists with versioning/encryption
+- [ ] S3 bucket `scale-terraform-state-dev` exists with versioning/encryption
 - [ ] DynamoDB table `scale-terraform-locks` created
-- [ ] Backend configuration saved to `BACKEND_CONFIG_POC.txt`
+- [ ] Backend configuration saved to `BACKEND_CONFIG_DEV.txt`
 - [ ] Test VPC project validated remote backend works
 - [ ] Test resources cleaned up
 
 ---
 
-**Previous Phase:** [Phase 1 - Repository Setup](phase-0-repository-setup.md)  
-**Next Phase:** [Phase 3 - Bootstrap Additional Accounts](phase-2-bootstrap-additional-accounts.md)
+**Previous Phase:** [Phase 1 - Repository Setup](phase-1-repository-setup.md)  
+**Next Phase:** [Phase 3 - Bootstrap Prod Account](phase-3-bootstrap-additional-accounts.md)
 
 **Estimated Time:** 30-60 minutes

@@ -10,10 +10,11 @@
 
 **Estimated Time:** 2-4 hours total (all accounts)
 
-- Phase 0: Repository Setup (1-2 hours)
-- Phase 1: Bootstrap POC Account (30-60 minutes)
-- Phase 2: Bootstrap Dev & Prod Accounts (30-60 minutes each)
-- Phase 3: Migrate to Remote State - **Optional** (15-30 minutes per account)
+- Phase 0: Prerequisites (30-60 minutes)
+- Phase 1: Repository Setup (1-2 hours)
+- Phase 2: Bootstrap Dev Account (30-60 minutes)
+- Phase 3: Bootstrap Prod Account (30-60 minutes)
+- Phase 4: Migrate to Remote State - **Optional** (15-30 minutes per account)
 
 ---
 
@@ -93,11 +94,65 @@ s3://scale-terraform-state-{account}/
 
 ## Multi-Account Structure
 
-| Account      | Purpose                 | State Bucket Name            |
-| ------------ | ----------------------- | ---------------------------- |
-| `scale-poc`  | Sandbox/experimentation | `scale-terraform-state-poc`  |
-| `scale-dev`  | Active development      | `scale-terraform-state-dev`  |
-| `scale-prod` | Production workloads    | `scale-terraform-state-prod` |
+| Account      | Purpose              | State Bucket Name            |
+| ------------ | -------------------- | ---------------------------- |
+| `scale-dev`  | Active development   | `scale-terraform-state-dev`  |
+| `scale-prod` | Production workloads | `scale-terraform-state-prod` |
+
+### Architecture Diagram
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        AWS Organization                                │
+│                                                                        │
+│  ┌────────────────────────────────┐  ┌──────────────────────────────┐  │
+│  │      Dev Account               │  │     Prod Account             │  │
+│  │      (123456789012)            │  │     (987654321098)           │  │
+│  │                                │  │                              │  │
+│  │  ┌──────────────────────────┐  │  │  ┌────────────────────────┐  │  │
+│  │  │ S3: scale-terraform-     │  │  │  │ S3: scale-terraform-   │  │  │
+│  │  │     state-dev            │  │  │  │     state-prod         │  │  │
+│  │  │                          │  │  │  │                        │  │  │
+│  │  │ ├─ us-east-1/            │  │  │  │ ├─ us-east-1/          │  │  │
+│  │  │ │  ├─ 00-network/        │  │  │  │ │  ├─ 00-network/      │  │  │
+│  │  │ │  └─ 10-application/    │  │  │  │ │  └─ 10-application/  │  │  │
+│  │  │ ├─ us-west-2/            │  │  │  │ ├─ us-west-2/          │  │  │
+│  │  │ └─ global/               │  │  │  │ └─ global/             │  │  │
+│  │  │                          │  │  │  │                        │  │  │
+│  │  │ Versioning: ✓            │  │  │  │ Versioning: ✓          │  │  │
+│  │  │ Encryption: SSE-S3       │  │  │  │ Encryption: SSE-S3     │  │  │
+│  │  └──────────────────────────┘  │  │  │ MFA Delete: ✓ (opt)    │  │  │
+│  │                                │  │  └────────────────────────┘  │  │
+│  │  ┌──────────────────────────┐  │  │                              │  │
+│  │  │ DynamoDB:                │  │  │  ┌────────────────────────┐  │  │
+│  │  │ scale-terraform-locks    │  │  │  │ DynamoDB:              │  │  │
+│  │  │                          │  │  │  │ scale-terraform-locks  │  │  │
+│  │  │ Partition Key: LockID    │  │  │  │                        │  │  │
+│  │  │ Billing: On-Demand       │  │  │  │ Partition Key: LockID  │  │  │
+│  │  └──────────────────────────┘  │  │  │ Billing: On-Demand     │  │  │
+│  │                                │  │  └────────────────────────┘  │  │
+│  │  ┌──────────────────────────┐  │  │                              │  │
+│  │  │ IAM Policy:              │  │  │  ┌────────────────────────┐  │  │
+│  │  │ terraform-state-         │  │  │  │ IAM Policy:            │  │  │
+│  │  │ access-dev               │  │  │  │ terraform-state-       │  │  │
+│  │  └──────────────────────────┘  │  │  │ access-prod            │  │  │
+│  │                                │  │  └────────────────────────┘  │  │
+│  └────────────────────────────────┘  └──────────────────────────────┘  │
+│                                                                        │
+│  Engineers deploy Dev resources     Engineers deploy Prod resources    │
+│         ↓                                      ↓                       │
+│  State stored in Dev S3 bucket      State stored in Prod S3 bucket     │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+Key Principles:
+• Account Isolation: Each account has independent state infrastructure
+• State Locality: Dev state in Dev account, Prod state in Prod account
+• No Cross-Account Dependencies: Dev and Prod can operate independently
+• Same Architecture: Consistent setup across all accounts
+```
+
+**Note:** This diagram shows the default "state-in-same-account" approach. See [Appendix F: State Storage Strategies](APPENDIX.md#appendix-f-state-storage-strategies) for alternative approaches like centralized state in Prod.
 
 ---
 
@@ -107,13 +162,11 @@ s3://scale-terraform-state-{account}/
 scale.infra-terraform-bootstrap/
 ├── README.md
 ├── accounts/
-│   ├── poc/
+│   ├── dev/
 │   │   ├── main.tf           # S3 bucket, DynamoDB table
 │   │   ├── variables.tf      # Account-specific variables
 │   │   ├── outputs.tf        # Backend config reference
 │   │   └── terraform.tfvars  # Account ID, region
-│   ├── dev/
-│   │   └── ...
 │   └── prod/
 │       └── ...
 └── modules/
@@ -127,25 +180,25 @@ scale.infra-terraform-bootstrap/
 
 ## Implementation Steps
 
-### Phase 1: Bootstrap POC Account
+### Phase 2: Bootstrap Dev Account
 
-**Step 1.1: Clone Repository**
+**Step 2.1: Clone Repository**
 
 ```bash
 git clone git@github.com:scale/scale.infra-terraform-bootstrap.git
-cd scale.infra-terraform-bootstrap/accounts/poc
+cd scale.infra-terraform-bootstrap/accounts/dev
 ```
 
-**Step 1.2: Configure Variables**
+**Step 2.2: Configure Variables**
 
 ```hcl
-# accounts/poc/terraform.tfvars
+# accounts/dev/terraform.tfvars
 aws_account_id = "123456789012"
-environment    = "poc"
+environment    = "dev"
 primary_region = "us-east-1"
 ```
 
-**Step 1.3: Initialize with Local State**
+**Step 2.3: Initialize with Local State**
 
 ```bash
 terraform init  # No backend configured - uses local state
@@ -153,21 +206,21 @@ terraform plan
 terraform apply
 ```
 
-**Step 1.4: Verify Resources Created**
+**Step 2.4: Verify Resources Created**
 
-- S3 Bucket: `scale-terraform-state-poc`
+- S3 Bucket: `scale-terraform-state-dev`
 - DynamoDB Table: `scale-terraform-locks`
 - Bucket versioning enabled
 - Encryption enabled (SSE-S3)
 
-**Step 1.5: Commit Backend Config**
+**Step 2.5: Commit Backend Config**
 Output will provide backend configuration for downstream projects:
 
 ```hcl
-# Copy this to scale-cloud-infrastructure/environments/poc/*/backend.tf
+# Copy this to scale-cloud-infrastructure/environments/dev/*/backend.tf
 terraform {
   backend "s3" {
-    bucket         = "scale-terraform-state-poc"
+    bucket         = "scale-terraform-state-dev"
     key            = "{region}/{layer}/terraform.tfstate"  # Replace per layer
     region         = "us-east-1"
     encrypt        = true
@@ -176,7 +229,7 @@ terraform {
 }
 ```
 
-**Step 1.6: Migrate Bootstrap to Remote State** (Optional)
+**Step 2.6: Migrate Bootstrap to Remote State** (Optional)
 After verifying the bucket works with other projects, you can migrate the bootstrap itself to use remote state:
 
 ```bash
@@ -186,18 +239,7 @@ terraform init -migrate-state
 
 ---
 
-### Phase 2: Repeat for Dev Account
-
-```bash
-cd ../dev
-# Update terraform.tfvars with dev account ID
-terraform init
-terraform apply
-```
-
----
-
-### Phase 3: Repeat for Prod Account
+### Phase 3: Bootstrap Prod Account
 
 ```bash
 cd ../prod
@@ -348,10 +390,10 @@ Once bootstrap is complete, reference the backend in all infrastructure projects
 ### Network Layer Example
 
 ```hcl
-# scale-cloud-infrastructure/environments/poc/us-east-1/00-network/backend.tf
+# scale-cloud-infrastructure/environments/dev/us-east-1/00-network/backend.tf
 terraform {
   backend "s3" {
-    bucket         = "scale-terraform-state-poc"
+    bucket         = "scale-terraform-state-dev"
     key            = "us-east-1/00-network/terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
@@ -363,10 +405,10 @@ terraform {
 ### Application Layer Example
 
 ```hcl
-# scale-cloud-infrastructure/environments/poc/us-east-1/10-application/backend.tf
+# scale-cloud-infrastructure/environments/dev/us-east-1/10-application/backend.tf
 terraform {
   backend "s3" {
-    bucket         = "scale-terraform-state-poc"
+    bucket         = "scale-terraform-state-dev"
     key            = "us-east-1/10-application/terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
@@ -378,10 +420,10 @@ terraform {
 ### Database Layer Example
 
 ```hcl
-# scale-cloud-infrastructure/environments/poc/us-east-1/20-database/backend.tf
+# scale-cloud-infrastructure/environments/dev/us-east-1/20-database/backend.tf
 terraform {
   backend "s3" {
-    bucket         = "scale-terraform-state-poc"
+    bucket         = "scale-terraform-state-dev"
     key            = "us-east-1/20-database/terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
@@ -393,10 +435,10 @@ terraform {
 ### Multi-Region Application Example
 
 ```hcl
-# scale-cloud-infrastructure/environments/poc/us-west-2/10-application/backend.tf
+# scale-cloud-infrastructure/environments/dev/us-west-2/10-application/backend.tf
 terraform {
   backend "s3" {
-    bucket         = "scale-terraform-state-poc"
+    bucket         = "scale-terraform-state-dev"
     key            = "us-west-2/10-application/terraform.tfstate"  # Different region in key
     region         = "us-east-1"  # Bucket location stays the same
     encrypt        = true
@@ -407,7 +449,7 @@ terraform {
 
 **Key Points:**
 
-- **One bucket per account** (`scale-terraform-state-poc` for all POC account infrastructure)
+- **One bucket per account** (`scale-terraform-state-dev` for all Dev account infrastructure)
 - **Organization via S3 key paths** (region/layer pattern)
 - **Same DynamoDB table** for locking across all layers
 - **Bucket region** is always the primary region (us-east-1), regardless of where resources are deployed
@@ -482,9 +524,9 @@ After bootstrap:
 ## Next Steps
 
 1. Create `scale.infra-terraform-bootstrap` repository
-2. Run bootstrap for POC account
+2. Run bootstrap for Dev account
 3. Integrate backend config into `scale-cloud-infrastructure`
-4. Repeat for dev/prod accounts as projects mature
+4. Run bootstrap for Prod account when approved
 
 ---
 
@@ -492,11 +534,11 @@ After bootstrap:
 
 - **[phase-0-prerequisites.md](phase-0-prerequisites.md)** - Install Terraform, AWS CLI, configure AWS SSO (macOS/Windows/Linux)
 - **[phase-1-repository-setup.md](phase-1-repository-setup.md)** - Repository and module creation
-- **[phase-2-bootstrap-poc.md](phase-2-bootstrap-poc.md)** - POC account bootstrap
-- **[phase-3-bootstrap-additional-accounts.md](phase-3-bootstrap-additional-accounts.md)** - Dev and Prod bootstrap
+- **[phase-2-bootstrap-poc.md](phase-2-bootstrap-poc.md)** - Dev account bootstrap
+- **[phase-3-bootstrap-additional-accounts.md](phase-3-bootstrap-additional-accounts.md)** - Prod account bootstrap
 - **[phase-4-migrate-to-remote-state.md](phase-4-migrate-to-remote-state.md)** - Optional state migration
 - **[phase-5-cicd-integration.md](phase-5-cicd-integration.md)** - GitHub Actions, GitLab CI, Jenkins integration
-- **[APPENDIX.md](APPENDIX.md)** - Naming conventions, regional considerations, state security, local vs remote state comparison
+- **[appendix.md](appendix.md)** - Naming conventions, regional considerations, state security, local vs remote state comparison, migration paths
 
 ---
 
