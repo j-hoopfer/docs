@@ -1,0 +1,485 @@
+# Terraform Bootstrap - Phase 1: Bootstrap POC Account
+
+## Overview
+
+**Now that the repository structure exists**, deploy Terraform state infrastructure (S3 + DynamoDB) to the POC AWS account. This phase creates the foundation for remote state management.
+
+**Duration:** 30-60 minutes
+
+**Who Should Complete This:** Platform engineers with admin access to POC AWS account
+
+---
+
+## Feature 2: Bootstrap POC Account
+
+### Story 2.1: Create POC Account Configuration Files
+
+- **Title:** Configure Terraform for POC Account Bootstrap
+- **Persona:** As a **Platform Engineer**, I need account-specific Terraform files for the POC environment so that I can create state infrastructure in the POC AWS account.
+
+- **Requirements:**
+  - `main.tf` calls state backend module
+  - `variables.tf` defines POC-specific variables
+  - `providers.tf` configures AWS provider (no backend yet)
+  - `outputs.tf` displays backend configuration
+  - `terraform.tfvars.example` provides template
+
+- **Implementation Details:**
+
+  #### 1) Create `accounts/poc/main.tf`
+
+  ```hcl
+  module "terraform_backend" {
+    source = "../../modules/terraform-state-backend"
+
+    bucket_name     = "scale-terraform-state-${var.environment}"
+    lock_table_name = "scale-terraform-locks"
+    environment     = var.environment
+
+    common_tags = {
+      ManagedBy   = "Terraform"
+      Repository  = "scale.infra-terraform-bootstrap"
+      Environment = var.environment
+      AccountID   = var.aws_account_id
+    }
+  }
+  ```
+
+  #### 2) Create `accounts/poc/variables.tf`
+
+  ```hcl
+  variable "aws_account_id" {
+    description = "AWS Account ID for POC environment"
+    type        = string
+
+    validation {
+      condition     = can(regex("^[0-9]{12}$", var.aws_account_id))
+      error_message = "AWS Account ID must be exactly 12 digits."
+    }
+  }
+
+  variable "environment" {
+    description = "Environment name"
+    type        = string
+    default     = "poc"
+  }
+
+  variable "primary_region" {
+    description = "Primary AWS region for state storage"
+    type        = string
+    default     = "us-east-1"
+  }
+  ```
+
+  #### 3) Create `accounts/poc/providers.tf`
+
+  ```hcl
+  terraform {
+    required_version = ">= 1.7.0"
+
+    required_providers {
+      aws = {
+        source  = "hashicorp/aws"
+        version = "~> 5.0"
+      }
+    }
+
+    # NOTE: No backend configured - uses local state for bootstrap
+    # After creation, you can optionally migrate this to use the remote backend
+  }
+
+  provider "aws" {
+    region = var.primary_region
+
+    # Uncomment if using AWS SSO profile
+    # profile = "scale-poc"
+  }
+  ```
+
+  #### 4) Create `accounts/poc/outputs.tf`
+
+  ```hcl
+  output "backend_configuration" {
+    description = "Copy this to your infrastructure projects"
+    value = <<-EOT
+      # Add this to your Terraform configuration:
+
+      terraform {
+        backend "s3" {
+          bucket         = "${module.terraform_backend.state_bucket_name}"
+          key            = "{region}/{layer}/terraform.tfstate"  # Replace with actual path
+          region         = "${var.primary_region}"
+          encrypt        = true
+          dynamodb_table = "${module.terraform_backend.lock_table_name}"
+        }
+      }
+    EOT
+  }
+
+  output "state_bucket" {
+    description = "S3 bucket for Terraform state"
+    value       = module.terraform_backend.state_bucket_name
+  }
+
+  output "lock_table" {
+    description = "DynamoDB table for state locking"
+    value       = module.terraform_backend.lock_table_name
+  }
+
+  output "iam_policy_arn" {
+    description = "IAM policy ARN for state access (attach to CI/CD roles)"
+    value       = module.terraform_backend.iam_policy_arn
+  }
+  ```
+
+  #### 5) Create `accounts/poc/terraform.tfvars.example`
+
+  ```hcl
+  # Copy this to terraform.tfvars and update with actual values
+
+  aws_account_id = "123456789012"  # Replace with POC account ID
+  environment    = "poc"
+  primary_region = "us-east-1"
+  ```
+
+- **Acceptance Criteria:**
+  - ✅ `accounts/poc/main.tf` calls terraform-state-backend module
+  - ✅ `accounts/poc/variables.tf` includes validation for account ID
+  - ✅ `accounts/poc/providers.tf` has NO backend block
+  - ✅ `accounts/poc/outputs.tf` displays backend configuration
+  - ✅ `accounts/poc/terraform.tfvars.example` exists (not ignored by Git)
+
+---
+
+### Story 2.2: Initialize and Apply POC Bootstrap
+
+- **Title:** Deploy Terraform State Infrastructure in POC Account
+- **Persona:** As a **Platform Engineer**, I need to run Terraform to create the S3 bucket and DynamoDB table so that the POC account has state infrastructure ready.
+
+- **Requirements:**
+  - AWS credentials configured for POC account
+  - `terraform.tfvars` created from example
+  - Terraform initialized with local backend
+  - Resources created successfully
+  - Backend configuration output captured
+
+- **Implementation Details:**
+
+  #### 1) Configure AWS Credentials
+
+  ```bash
+  # Option A: AWS SSO
+  aws sso login --profile scale-poc
+  export AWS_PROFILE=scale-poc
+
+  # Option B: Set profile in providers.tf
+  # Uncomment the profile line in providers.tf
+
+  # Verify credentials
+  aws sts get-caller-identity
+  # Should show POC account ID
+  ```
+
+  #### 2) Create `terraform.tfvars`
+
+  ```bash
+  cd accounts/poc
+  cp terraform.tfvars.example terraform.tfvars
+  vim terraform.tfvars
+  ```
+
+  **Update with actual POC account ID:**
+
+  ```hcl
+  aws_account_id = "123456789012"  # Your actual POC account ID
+  environment    = "poc"
+  primary_region = "us-east-1"
+  ```
+
+  #### 3) Initialize Terraform
+
+  ```bash
+  terraform init
+  ```
+
+  **Expected output:**
+
+  ```
+  Initializing modules...
+  - terraform_backend in ../../modules/terraform-state-backend
+
+  Initializing the backend...
+
+  Initializing provider plugins...
+  - Finding hashicorp/aws versions matching "~> 5.0"...
+  - Installing hashicorp/aws v5.x.x...
+
+  Terraform has been successfully initialized!
+  ```
+
+  #### 4) Review Plan
+
+  ```bash
+  terraform plan
+  ```
+
+  **Should show:**
+  - `+` Create `aws_s3_bucket.terraform_state`
+  - `+` Create `aws_s3_bucket_versioning.terraform_state`
+  - `+` Create `aws_s3_bucket_server_side_encryption_configuration.terraform_state`
+  - `+` Create `aws_s3_bucket_public_access_block.terraform_state`
+  - `+` Create `aws_s3_bucket_lifecycle_configuration.terraform_state`
+  - `+` Create `aws_dynamodb_table.terraform_locks`
+  - `+` Create `aws_iam_policy.terraform_state_access`
+
+  **Total: 7 resources to create**
+
+  #### 5) Apply Configuration
+
+  ```bash
+  terraform apply
+  ```
+
+  Type `yes` when prompted.
+
+  **Expected output:**
+
+  ```
+  module.terraform_backend.aws_s3_bucket.terraform_state: Creating...
+  module.terraform_backend.aws_dynamodb_table.terraform_locks: Creating...
+  ...
+  Apply complete! Resources: 7 added, 0 changed, 0 destroyed.
+
+  Outputs:
+
+  backend_configuration = <<EOT
+  # Add this to your Terraform configuration:
+
+  terraform {
+    backend "s3" {
+      bucket         = "scale-terraform-state-poc"
+      key            = "{region}/{layer}/terraform.tfstate"
+      region         = "us-east-1"
+      encrypt        = true
+      dynamodb_table = "scale-terraform-locks"
+    }
+  }
+  EOT
+  iam_policy_arn = "arn:aws:iam::123456789012:policy/terraform-state-access-poc"
+  lock_table = "scale-terraform-locks"
+  state_bucket = "scale-terraform-state-poc"
+  ```
+
+  #### 6) Capture Backend Configuration
+
+  ```bash
+  terraform output backend_configuration > ../../BACKEND_CONFIG_POC.txt
+  ```
+
+  #### 7) Verify Resources in AWS Console
+
+  **S3 Bucket:**
+  - Navigate to S3 → Buckets
+  - Find `scale-terraform-state-poc`
+  - Properties → Versioning: **Enabled**
+  - Properties → Encryption: **Enabled (AES-256)**
+
+  **DynamoDB Table:**
+  - Navigate to DynamoDB → Tables
+  - Find `scale-terraform-locks`
+  - Billing mode: **On-demand**
+  - Partition key: **LockID (String)**
+
+- **Technical Requirements:**
+  - AWS CLI configured with admin access to POC account
+  - Terraform 1.7.0+
+  - Internet connectivity for provider downloads
+
+- **Acceptance Criteria:**
+  - ✅ `terraform apply` completes without errors
+  - ✅ S3 bucket `scale-terraform-state-poc` exists
+  - ✅ Bucket has versioning enabled
+  - ✅ Bucket has encryption enabled
+  - ✅ DynamoDB table `scale-terraform-locks` exists with `LockID` key
+  - ✅ IAM policy created for state access
+  - ✅ Backend configuration output saved
+
+---
+
+### Story 2.3: Validate Backend with Test Project
+
+- **Title:** Test Remote Backend with Sample Terraform Project
+- **Persona:** As a **Platform Engineer**, I need to verify the state backend works correctly so that I can confidently deploy real infrastructure using it.
+
+- **Requirements:**
+  - Create test Terraform project
+  - Configure backend to use new S3 bucket
+  - Deploy test resource
+  - Verify state stored in S3
+  - Verify DynamoDB lock created during apply
+  - Clean up test resources
+
+- **Implementation Details:**
+
+  #### 1) Create Test Directory
+
+  ```bash
+  mkdir -p ~/test-terraform-backend
+  cd ~/test-terraform-backend
+  ```
+
+  #### 2) Create Test Configuration
+
+  ```hcl
+  # main.tf
+  terraform {
+    backend "s3" {
+      bucket         = "scale-terraform-state-poc"
+      key            = "test/vpc/terraform.tfstate"
+      region         = "us-east-1"
+      encrypt        = true
+      dynamodb_table = "scale-terraform-locks"
+    }
+
+    required_providers {
+      aws = {
+        source  = "hashicorp/aws"
+        version = "~> 5.0"
+      }
+    }
+  }
+
+  provider "aws" {
+    region = "us-east-1"
+  }
+
+  resource "aws_vpc" "test" {
+    cidr_block = "10.99.0.0/16"
+
+    tags = {
+      Name = "test-backend-vpc"
+    }
+  }
+
+  output "vpc_id" {
+    value = aws_vpc.test.id
+  }
+  ```
+
+  #### 3) Initialize with Remote Backend
+
+  ```bash
+  terraform init
+  ```
+
+  **Expected output:**
+
+  ```
+  Initializing the backend...
+
+  Successfully configured the backend "s3"! Terraform will automatically
+  use this backend unless the backend configuration changes.
+
+  Initializing provider plugins...
+  ...
+  Terraform has been successfully initialized!
+  ```
+
+  #### 4) Apply Test Resource
+
+  ```bash
+  terraform apply -auto-approve
+  ```
+
+  **Expected output:**
+
+  ```
+  aws_vpc.test: Creating...
+  aws_vpc.test: Creation complete after 3s [id=vpc-0abc123]
+
+  Apply complete! Resources: 1 added, 0 changed, 0 destroyed.
+
+  Outputs:
+
+  vpc_id = "vpc-0abc123"
+  ```
+
+  #### 5) Verify State in S3
+
+  ```bash
+  aws s3 ls s3://scale-terraform-state-poc/test/vpc/
+  # Should show: terraform.tfstate
+
+  # Download and inspect (optional)
+  aws s3 cp s3://scale-terraform-state-poc/test/vpc/terraform.tfstate /tmp/state.json
+  cat /tmp/state.json | jq '.resources[] | select(.type=="aws_vpc")'
+  ```
+
+  #### 6) Verify DynamoDB Lock Behavior
+
+  ```bash
+  # In one terminal, start a long-running operation
+  terraform plan &
+
+  # In another terminal, try to run another operation
+  # (should show lock error)
+  terraform plan
+  ```
+
+  **Expected error:**
+
+  ```
+  Error: Error acquiring the state lock
+
+  Error message: ConditionalCheckFailedException: The conditional request failed
+  Lock Info:
+    ID:        abc-123-xyz
+    Path:      scale-terraform-state-poc/test/vpc/terraform.tfstate
+    Operation: OperationTypePlan
+    Who:       your-username@hostname
+    ...
+  ```
+
+  #### 7) Clean Up Test Resources
+
+  ```bash
+  terraform destroy -auto-approve
+
+  # Delete state file from S3
+  aws s3 rm s3://scale-terraform-state-poc/test/vpc/terraform.tfstate
+
+  # Remove test directory
+  cd ~
+  rm -rf test-terraform-backend
+  ```
+
+- **Acceptance Criteria:**
+  - ✅ Test project initializes with S3 backend
+  - ✅ `terraform apply` creates VPC
+  - ✅ State file appears in S3 at `test/vpc/terraform.tfstate`
+  - ✅ Concurrent operations trigger lock error
+  - ✅ `terraform destroy` cleans up resources
+  - ✅ State backend proven to work correctly
+
+---
+
+## Phase 1 Checklist
+
+Complete this checklist before proceeding to Phase 2:
+
+- [ ] `accounts/poc/` configuration files created
+- [ ] `terraform.tfvars` created with actual POC account ID
+- [ ] AWS credentials verified for POC account
+- [ ] `terraform apply` completed successfully
+- [ ] S3 bucket `scale-terraform-state-poc` exists with versioning/encryption
+- [ ] DynamoDB table `scale-terraform-locks` created
+- [ ] Backend configuration saved to `BACKEND_CONFIG_POC.txt`
+- [ ] Test VPC project validated remote backend works
+- [ ] Test resources cleaned up
+
+---
+
+**Previous Phase:** [Phase 1 - Repository Setup](phase-0-repository-setup.md)  
+**Next Phase:** [Phase 3 - Bootstrap Additional Accounts](phase-2-bootstrap-additional-accounts.md)
+
+**Estimated Time:** 30-60 minutes
