@@ -130,8 +130,9 @@ EOF
 
 #### 2) Create Root `README.md`
 
-```bash
-cat > README.md << 'EOF'
+Create a file named `README.md` in the root of the repository and paste the following content:
+
+````markdown
 # Terraform Bootstrap
 
 **Purpose:** One-time setup to create Terraform state infrastructure (S3 + DynamoDB) for Dev and Prod AWS accounts.
@@ -139,6 +140,7 @@ cat > README.md << 'EOF'
 ## Overview
 
 This repository solves the "chicken and egg" problem:
+
 - **Problem:** You need an S3 bucket to store Terraform state
 - **Solution:** Run this bootstrap project with local state once per account
 
@@ -149,8 +151,8 @@ After bootstrap, all other infrastructure projects use the remote S3 backend.
 mycompany.infra-terraform-bootstrap/
 ├── modules/terraform-state-backend/ # Reusable module
 └── accounts/ # Account-specific configs
-    ├── dev/
-    └── prod/
+├── dev/
+└── prod/
 
 ## Modules
 
@@ -159,6 +161,7 @@ mycompany.infra-terraform-bootstrap/
 Creates S3 bucket and DynamoDB table for Terraform remote state storage.
 
 #### Features
+
 - S3 bucket with versioning enabled
 - Server-side encryption (AES256 or KMS)
 - Public access blocked
@@ -167,6 +170,8 @@ Creates S3 bucket and DynamoDB table for Terraform remote state storage.
 - IAM policy for CI/CD access
 
 #### Usage Example
+
+```hcl
 module "terraform_backend" {
   source = "../../modules/terraform-state-backend"
 
@@ -179,6 +184,8 @@ module "terraform_backend" {
     Repository = "mycompany.infra-terraform-bootstrap"
   }
 }
+```
+````
 
 #### Outputs
 
@@ -186,8 +193,8 @@ module "terraform_backend" {
 - `lock_table_name` - DynamoDB table name
 - `iam_policy_arn` - IAM policy ARN for CI/CD
 - `backend_config` - Complete backend configuration
-EOF
-```
+
+````
 
 #### 3) Commit Files
 
@@ -195,7 +202,7 @@ EOF
 git add .
 git commit -m "Add Terraform state backend module and documentation"
 git push -u origin main
-```
+````
 
 - **Acceptance Criteria:**
   - ✅ `.gitignore` excludes `*.tfstate`, `*.tfvars`, `.terraform/`
