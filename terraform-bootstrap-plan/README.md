@@ -2,21 +2,23 @@
 
 **Purpose:** Initialize Terraform state management infrastructure across AWS accounts and regions for mycompany's cloud infrastructure.
 
-**Repository:** `mycompany.infra-terraform-bootstrap`
+**Repository:** `scale.infra-terraform-bootstrap` (replace `scale` with your company name)
 
 **Scope:** One-time setup per AWS account to create S3 state buckets, DynamoDB lock tables, and IAM policies required for safe Terraform operations.
 
-**Target Audience:** Junior engineers and AI agents - includes detailed step-by-step instructions with personas, acceptance criteria, and validation steps.
+**Target Audience:** Junior engineers, contingent workers, and AI agents - includes detailed step-by-step instructions with personas, acceptance criteria, and validation steps.
 
-**Estimated Time:** 2-4 hours total (all accounts)
+**Estimated Time:** 2.5-5 hours total (all accounts, core phases)
 
 - Phase 0: Prerequisites (30-60 minutes)
 - Phase 1: Repository Setup (30-45 minutes)
 - Phase 2: Create Terraform Module (30-45 minutes)
 - Phase 3: Bootstrap Dev Account (30-60 minutes)
-- Phase 4: Bootstrap Prod Account (30-60 minutes)
-- Phase 5: Migrate to Remote State - **Optional** (15-30 minutes per account)
-- Phase 6: Bootstrap CI/CD - **Optional** (45-60 minutes)
+- Phase 4: Continuous Integration (30-45 minutes) - Validation workflows
+- Phase 5: Bootstrap Prod Account (30-60 minutes)
+- Phase 6: Migrate to Remote State - **Optional** (15-30 minutes per account)
+- Phase 7: Continuous Deployment - **Optional** (60-90 minutes) - Automated deployment
+- Phase 8: What's Next After Bootstrap (guidance)
 
 ---
 
@@ -46,7 +48,7 @@ This bootstrap project breaks the cycle by running **once** with **local state**
 - Once the S3 bucket exists, all other Terraform projects (including bootstrap itself) can use remote state
 - This is a one-time operation - you never need to do this again for that AWS account
 
-**Note:** Migrating the bootstrap project itself to remote state (Phase 3) is **optional**. See [Appendix D](APPENDIX.md#appendix-d-local-vs-remote-state-for-bootstrap) for guidance.
+**Note:** Migrating the bootstrap project itself to remote state (Phase 6) is **optional**. See [Local vs Remote State](appendix/local-vs-remote-state.md) for guidance on understanding what state migration actually means and whether you should do it.
 
 ---
 
@@ -69,7 +71,7 @@ Per AWS Account (in primary region):
 **State Organization:** Use S3 key prefixes to separate regions
 
 ```
-s3://mycompany-terraform-state-{account}/
+s3://scale-terraform-state-{account}/
 ├── us-east-1/
 │   ├── 00-network/terraform.tfstate
 │   └── 10-application/terraform.tfstate
@@ -96,16 +98,16 @@ s3://mycompany-terraform-state-{account}/
 
 ## Multi-Account Structure
 
-| Account | Purpose              | State Bucket Name                |
-| ------- | -------------------- | -------------------------------- |
-| Dev     | Development/Testing  | `mycompany-terraform-state-dev`  |
-| Prod    | Production/Workloads | `mycompany-terraform-state-prod` |
+| Account | Purpose              | State Bucket Name            | Lock Table Name        |
+| ------- | -------------------- | ---------------------------- | ---------------------- |
+| Dev     | Development/Testing  | `scale-terraform-state-dev`  | `terraform-locks-dev`  |
+| Prod    | Production/Workloads | `scale-terraform-state-prod` | `terraform-locks-prod` |
 
 ---
 
 ## Quick Execution Guide
 
-Once the repository is set up and the modules are created, follow these high-level steps to bootstrap an account (refer to Phase 3/4 for details):
+Once the repository is set up and the modules are created, follow these high-level steps to bootstrap an account (refer to Phase 3/5 for Dev/Prod details):
 
 ### 1. Configure the Account
 
@@ -252,14 +254,14 @@ terraform apply
 Output will provide backend configuration for downstream projects:
 
 ```hcl
-# Copy this to {company}-cloud-infrastructure/environments/dev/*/backend.tf
+# Copy this to infrastructure projects' backend.tf
 terraform {
   backend "s3" {
-    bucket         = "mycompany-terraform-state-dev"
+    bucket         = "scale-terraform-state-dev"
     key            = "{region}/{layer}/terraform.tfstate"  # Replace per layer
     region         = "us-east-1"
     encrypt        = true
-    dynamodb_table = "mycompany-terraform-locks"
+    dynamodb_table = "terraform-locks-dev"
   }
 }
 ```
@@ -345,9 +347,11 @@ Attach this policy to your IAM Identity Center permission sets or IAM groups:
 }
 ```
 
-**For Bootstrap CI/CD:** See [phase-6-bootstrap-cicd.md](phase-6-bootstrap-cicd.md) for automated validation and deployment of the bootstrap project itself.
+**For Bootstrap CI (Validation):** See [phase-4-bootstrap-ci.md](phase/phase-4-bootstrap-ci.md) for automated validation workflows (format, security, linting).
 
-**For Downstream Project CI/CD:** See [phase-7-downstream-cicd.md](phase-7-downstream-cicd.md) for GitHub Actions, GitLab CI, and Jenkins setup in infrastructure projects that use this bootstrap.
+**For Bootstrap CD (Deployment):** See [phase-7-continuous-deployment.md](phase/phase-7-continuous-deployment.md) for OIDC setup and automated deployment workflows.
+
+**For Downstream Project CI/CD:** See [phase-8-downstream-cicd.md](phase/phase-8-downstream-cicd.md) for GitHub Actions, GitLab CI, and Jenkins setup in infrastructure projects that use this bootstrap.
 
 ### Read-Only Access Policy (For Auditors)
 
@@ -427,14 +431,14 @@ Once bootstrap is complete, reference the backend in all infrastructure projects
 ### Network Layer Example
 
 ```hcl
-# {company}-cloud-infrastructure/environments/dev/us-east-1/00-network/backend.tf
+# infrastructure/environments/dev/us-east-1/00-network/backend.tf
 terraform {
   backend "s3" {
-    bucket         = "mycompany-terraform-state-dev"
+    bucket         = "scale-terraform-state-dev"
     key            = "us-east-1/00-network/terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
-    dynamodb_table = "mycompany-terraform-locks"
+    dynamodb_table = "terraform-locks-dev"
   }
 }
 ```
@@ -442,14 +446,14 @@ terraform {
 ### Application Layer Example
 
 ```hcl
-# {company}-cloud-infrastructure/environments/dev/us-east-1/10-application/backend.tf
+# infrastructure/environments/dev/us-east-1/10-application/backend.tf
 terraform {
   backend "s3" {
-    bucket         = "mycompany-terraform-state-dev"
+    bucket         = "scale-terraform-state-dev"
     key            = "us-east-1/10-application/terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
-    dynamodb_table = "mycompany-terraform-locks"
+    dynamodb_table = "terraform-locks-dev"
   }
 }
 ```
@@ -457,14 +461,14 @@ terraform {
 ### Database Layer Example
 
 ```hcl
-# {company}-cloud-infrastructure/environments/dev/us-east-1/20-database/backend.tf
+# infrastructure/environments/dev/us-east-1/20-database/backend.tf
 terraform {
   backend "s3" {
-    bucket         = "mycompany-terraform-state-dev"
+    bucket         = "scale-terraform-state-dev"
     key            = "us-east-1/20-database/terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
-    dynamodb_table = "mycompany-terraform-locks"
+    dynamodb_table = "terraform-locks-dev"
   }
 }
 ```
@@ -472,23 +476,23 @@ terraform {
 ### Multi-Region Application Example
 
 ```hcl
-# {company}-cloud-infrastructure/environments/dev/us-west-2/10-application/backend.tf
+# infrastructure/environments/dev/us-west-2/10-application/backend.tf
 terraform {
   backend "s3" {
-    bucket         = "mycompany-terraform-state-dev"
+    bucket         = "scale-terraform-state-dev"
     key            = "us-west-2/10-application/terraform.tfstate"  # Different region in key
     region         = "us-east-1"  # Bucket location stays the same
     encrypt        = true
-    dynamodb_table = "mycompany-terraform-locks"
+    dynamodb_table = "terraform-locks-dev"
   }
 }
 ```
 
 **Key Points:**
 
-- **One bucket per account** (`{company}-terraform-state-dev` for all Dev account infrastructure)
+- **One bucket per account** (`scale-terraform-state-dev` for all Dev account infrastructure)
 - **Organization via S3 key paths** (region/layer pattern)
-- **Same DynamoDB table** for locking across all layers
+- **Separate lock tables per account** (`terraform-locks-dev`, `terraform-locks-prod`)
 - **Bucket region** is always the primary region (us-east-1), regardless of where resources are deployed
 
 ---
@@ -569,15 +573,16 @@ After bootstrap:
 
 ## Additional Resources
 
-- **[phase-0-prerequisites.md](phase-0-prerequisites.md)** - Install Terraform, AWS CLI, configure AWS SSO (macOS/Windows/Linux)
-- **[phase-1-repository-setup.md](phase-1-repository-setup.md)** - Repository initialization and Git configuration
-- **[phase-2-terraform-module.md](phase-2-terraform-module.md)** - Terraform state backend module creation
-- **[phase-3-bootstrap-dev.md](phase-3-bootstrap-dev.md)** - Dev account bootstrap
-- **[phase-4-bootstrap-prod.md](phase-4-bootstrap-prod.md)** - Prod account bootstrap
-- **[phase-5-migrate-to-remote-state.md](phase-5-migrate-to-remote-state.md)** - Optional state migration
-- **[phase-6-bootstrap-cicd.md](phase-6-bootstrap-cicd.md)** - CI/CD for the bootstrap project itself
-- **[phase-7-downstream-cicd.md](phase-7-downstream-cicd.md)** - CI/CD integration for infrastructure projects using this bootstrap
-- **[appendix.md](appendix.md)** - Naming conventions, regional considerations, state security, local vs remote state comparison, migration paths
+- **[phase-0-prerequisites.md](phase/phase-0-prerequisites.md)** - Install Terraform, AWS CLI, configure AWS SSO (macOS/Windows/Linux)
+- **[phase-1-repository-setup.md](phase/phase-1-repository-setup.md)** - Repository initialization and Git configuration
+- **[phase-2-terraform-module.md](phase/phase-2-terraform-module.md)** - Terraform state backend module creation
+- **[phase-3-bootstrap-dev.md](phase/phase-3-bootstrap-dev.md)** - Dev account bootstrap
+- **[phase-4-bootstrap-ci.md](phase/phase-4-bootstrap-ci.md)** - Continuous Integration (validation workflows)
+- **[phase-5-bootstrap-prod.md](phase/phase-5-bootstrap-prod.md)** - Prod account bootstrap
+- **[phase-6-migrate-to-remote-state.md](phase/phase-6-migrate-to-remote-state.md)** - Optional state migration (flexible ordering - dev before prod is OK)
+- **[phase-7-continuous-deployment.md](phase/phase-7-continuous-deployment.md)** - Optional: Automated deployment with OIDC
+- **[phase-8-next-steps.md](phase/phase-8-next-steps.md)** - What to do after bootstrap completion
+- **[appendix/](appendix/)** - Additional guides (naming, state migration concepts, AWS SSO, adding accounts, etc.)
 
 ---
 

@@ -730,7 +730,6 @@ Run this verification script:
 
 **macOS/Linux/WSL:**
 
-````bash
 ```bash
 # Run this verification script
 echo "=== Terraform ==="
@@ -752,7 +751,7 @@ echo -e "\n=== Git ==="
 git --version
 git config --global user.name
 git config --global user.email
-````
+```
 
 **Windows (PowerShell):**
 
@@ -938,7 +937,76 @@ aws sso login --profile mycompany-dev
 
 ---
 
-## 12. Next Steps
+## 12. Regional Planning
+
+Before proceeding with bootstrap, understand how regions work:
+
+### Key Concepts
+
+**The bootstrap creates ONE S3 bucket per account:**
+
+- Runs **once per account**, not once per region
+- S3 bucket is created in your **primary region** (typically `us-east-1`)
+- DynamoDB table is also in your primary region
+- All regions in that account use the same S3 bucket for state storage
+
+**Example:**
+
+```
+Dev Account (111111111111)
+├── S3 Bucket: mycompany-terraform-state-dev (in us-east-1)
+├── DynamoDB: mycompany-terraform-locks (in us-east-1)
+└── Used by Terraform in ALL regions:
+    ├── us-east-1 (primary)
+    ├── us-west-2 (secondary)
+    └── eu-west-1 (if needed)
+```
+
+### Choosing Your Primary Region
+
+**Recommendation:** Use **us-east-1** (US East - N. Virginia) as your primary region unless you have specific requirements:
+
+**Why us-east-1?**
+
+- ✅ Oldest AWS region - most services available
+- ✅ New services launch here first
+- ✅ Often the lowest latency for global services
+- ✅ Convention in most AWS documentation
+- ✅ Required for some global resources (CloudFront certificates)
+
+**When to choose a different primary region:**
+
+- Company is based outside North America
+- Data sovereignty requirements (GDPR, etc.)
+- Specific compliance mandates
+
+**Common alternatives:**
+
+- **eu-west-1** (Ireland) - European primary
+- **ap-southeast-1** (Singapore) - Asia-Pacific primary
+- **us-west-2** (Oregon) - West Coast US
+
+### State Key Organization
+
+Your state files will be organized by region in the S3 bucket:
+
+```
+s3://mycompany-terraform-state-dev/
+├── global/                          # Region-independent resources
+│   ├── iam/terraform.tfstate        # IAM roles, policies
+│   └── route53/terraform.tfstate    # DNS zones
+├── us-east-1/                       # Primary region resources
+│   ├── vpc/terraform.tfstate        # VPC, subnets
+│   └── ecs/terraform.tfstate        # ECS clusters
+└── us-west-2/                       # Secondary region resources
+    └── vpc/terraform.tfstate        # DR VPC
+```
+
+**Decision Point:** Choose your primary region now - it will be used in Phase 3 when bootstrapping Dev account.
+
+---
+
+## 13. Next Steps
 
 Once all prerequisites are verified:
 
@@ -946,10 +1014,13 @@ Once all prerequisites are verified:
 2. ✅ AWS SSO configured for POC/Dev/Prod accounts
 3. ✅ GitHub CLI authenticated (optional)
 4. ✅ Git configured with your identity
+5. ✅ Primary region selected (`us-east-1` recommended)
+
+**Proceed to Phase 1: Repository Setup**
 
 ---
 
-## 13. Additional Resources
+## 14. Additional Resources
 
 - [Terraform Installation Guide](https://developer.hashicorp.com/terraform/tutorials/aws-get-started/install-cli)
 - [AWS CLI v2 Installation Guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)

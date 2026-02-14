@@ -1,8 +1,47 @@
 # Terraform Bootstrap - Phase 3: Bootstrap Dev Account
 
+## Prerequisites
+
+**Required Access:**
+
+- AWS Dev account admin/PowerUser access
+- AWS SSO configured for Dev account (see Phase 0)
+- Write access to bootstrap repository
+
+**Required Tools:**
+
+- Terraform >= 1.7.0 installed locally
+- AWS CLI v2 installed and configured
+- `jq` (for optional JSON parsing)
+- Git CLI
+- Text editor
+
+**Required Credentials:**
+
+- AWS SSO profile configured: `mycompany-dev`
+- Ability to run `aws sso login --profile mycompany-dev`
+- Verified with `aws sts get-caller-identity`
+
+**Required Information:**
+
+- Dev AWS account ID (12-digit number)
+- Primary region (e.g., `us-east-1`)
+
+**Previous Phase:** [Phase 2 - Create Terraform Module](phase-2-terraform-module.md) must be completed
+
+---
+
 ## Overview
 
 **Now that the repository structure and module exist**, deploy Terraform state infrastructure (S3 + DynamoDB) to the Dev AWS account. This phase creates the foundation for remote state management in your development environment.
+
+**Important Regional Notes:**
+
+- This bootstrap process runs **once per account**
+- Run it in your **primary region** (typically `us-east-1`)
+- The S3 bucket will be created in the region specified in your provider configuration
+- All Terraform projects across all regions in this account will use this bucket
+- State files will be organized by key paths: `global/`, `us-east-1/`, `us-west-2/`, etc.
 
 **Duration:** 30-60 minutes
 
@@ -26,121 +65,129 @@
 
 - **Implementation Details:**
 
-  #### 1) Create `accounts/dev/main.tf`
+```bash
+touch accounts/dev/main.tf
+touch accounts/dev/variables.tf
+touch accounts/dev/providers.tf
+touch accounts/dev/outputs.tf
+touch accounts/dev/terraform.tfvars.example
+```
 
-  ```hcl
-  module "terraform_backend" {
-    source = "../../modules/terraform-state-backend"
+#### 1) Create `accounts/dev/variables.tf`
 
-    bucket_name     = "mycompany-terraform-state-${var.environment}"
-    lock_table_name = "mycompany-terraform-locks"
-    environment     = var.environment
+```hcl
+variable "aws_account_id" {
+  description = "AWS Account ID for Dev environment"
+  type        = string
 
-    common_tags = {
-      ManagedBy   = "Terraform"
-      Repository  = "mycompany.infra-terraform-bootstrap"
-      Environment = var.environment
-      AccountID   = var.aws_account_id
+  validation {
+    condition     = can(regex("^[0-9]{12}$", var.aws_account_id))
+    error_message = "AWS Account ID must be exactly 12 digits."
+  }
+}
+
+variable "environment" {
+  description = "Environment name"
+  type        = string
+  default     = "dev"
+}
+
+variable "primary_region" {
+  description = "Primary AWS region for state storage"
+  type        = string
+  default     = "us-east-1"
+}
+```
+
+#### 2) Create `accounts/dev/main.tf`
+
+```hcl
+module "terraform_backend" {
+  source = "../../modules/terraform-state-backend"
+
+  bucket_name     = "mycompany-terraform-state-${var.environment}"
+  lock_table_name = "mycompany-terraform-locks"
+  environment     = var.environment
+
+  common_tags = {
+    ManagedBy   = "Terraform"
+    Repository  = "mycompany.infra-terraform-bootstrap"
+    Environment = var.environment
+    AccountID   = var.aws_account_id
+  }
+}
+```
+
+#### 3) Create `accounts/dev/providers.tf`
+
+```hcl
+terraform {
+  required_version = ">= 1.7.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
     }
   }
-  ```
 
-  #### 2) Create `accounts/dev/variables.tf`
+  # NOTE: No backend configured - uses local state for bootstrap
+  # After creation, you can optionally migrate this to use the remote backend
+}
 
-  ```hcl
-  variable "aws_account_id" {
-    description = "AWS Account ID for Dev environment"
-    type        = string
+provider "aws" {
+  region = var.primary_region
 
-    validation {
-      condition     = can(regex("^[0-9]{12}$", var.aws_account_id))
-      error_message = "AWS Account ID must be exactly 12 digits."
-    }
-  }
+  # Uncomment if using AWS SSO profile
+  # profile = "mycompany-dev"
+}
+```
 
-  variable "environment" {
-    description = "Environment name"
-    type        = string
-    default     = "dev"
-  }
+#### 4) Create `accounts/dev/outputs.tf`
 
-  variable "primary_region" {
-    description = "Primary AWS region for state storage"
-    type        = string
-    default     = "us-east-1"
-  }
-  ```
+```hcl
+output "backend_configuration" {
+  description = "Copy this to your infrastructure projects"
+  value = <<-EOT
+    # Add this to your Terraform configuration:
 
-  #### 3) Create `accounts/dev/providers.tf`
-
-  ```hcl
-  terraform {
-    required_version = ">= 1.7.0"
-
-    required_providers {
-      aws = {
-        source  = "hashicorp/aws"
-        version = "~> 5.0"
+    terraform {
+      backend "s3" {
+        bucket         = "${module.terraform_backend.state_bucket_name}"
+        key            = "{region}/{layer}/terraform.tfstate"  # Replace with actual path
+        region         = "${var.primary_region}"
+        encrypt        = true
+        dynamodb_table = "${module.terraform_backend.lock_table_name}"
       }
     }
+  EOT
+}
 
-    # NOTE: No backend configured - uses local state for bootstrap
-    # After creation, you can optionally migrate this to use the remote backend
-  }
+output "state_bucket" {
+  description = "S3 bucket for Terraform state"
+  value       = module.terraform_backend.state_bucket_name
+}
 
-  provider "aws" {
-    region = var.primary_region
+output "lock_table" {
+  description = "DynamoDB table for state locking"
+  value       = module.terraform_backend.lock_table_name
+}
 
-    # Uncomment if using AWS SSO profile
-    # profile = "mycompany-dev"
-  }
-  ```
+output "iam_policy_arn" {
+  description = "IAM policy ARN for state access (attach to CI/CD roles)"
+  value       = module.terraform_backend.iam_policy_arn
+}
+```
 
-  #### 4) Create `accounts/dev/outputs.tf`
+#### 5) Create `accounts/dev/terraform.tfvars.example`
 
-  ```hcl
-  output "backend_configuration" {
-    description = "Copy this to your infrastructure projects"
-    value = <<-EOT
-      # Add this to your Terraform configuration:
+```hcl
+# Copy this to terraform.tfvars and update with actual values
 
-      terraform {
-        backend "s3" {
-          bucket         = "${module.terraform_backend.state_bucket_name}"
-          key            = "{region}/{layer}/terraform.tfstate"  # Replace with actual path
-          region         = "${var.primary_region}"
-          encrypt        = true
-          dynamodb_table = "${module.terraform_backend.lock_table_name}"
-        }
-      }
-    EOT
-  }
-
-  output "state_bucket" {
-    description = "S3 bucket for Terraform state"
-    value       = module.terraform_backend.state_bucket_name
-  }
-
-  output "lock_table" {
-    description = "DynamoDB table for state locking"
-    value       = module.terraform_backend.lock_table_name
-  }
-
-  output "iam_policy_arn" {
-    description = "IAM policy ARN for state access (attach to CI/CD roles)"
-    value       = module.terraform_backend.iam_policy_arn
-  }
-  ```
-
-  #### 5) Create `accounts/dev/terraform.tfvars.example`
-
-  ```hcl
-  # Copy this to terraform.tfvars and update with actual values
-
-  aws_account_id = "123456789012"  # Replace with Dev account ID
-  environment    = "dev"
-  primary_region = "us-east-1"
-  ```
+aws_account_id = "123456789012"  # Replace with Dev account ID
+environment    = "dev"
+primary_region = "us-east-1"
+```
 
 - **Acceptance Criteria:**
   - ✅ `accounts/dev/main.tf` calls terraform-state-backend module
@@ -151,7 +198,38 @@
 
 ---
 
-### Story 3.2: Initialize and Apply Dev Bootstrap
+### Story 3.2: Commit Dev Configuration
+
+- **Title:** Version Control Dev Account Configuration
+- **Persona:** As a **Platform Engineer**, I need to commit the Dev account configuration to Git so that the configuration is version-controlled before infrastructure deployment.
+
+- **Requirements:**
+  - Dev configuration files staged for commit
+  - Descriptive commit message
+  - Changes pushed to remote repository
+
+- **Implementation Details:**
+
+  #### 1) Stage and Commit
+
+  ```bash
+  # Stage the new files
+  git add accounts/dev/
+
+  # Commit to version control
+  git commit -m "Add Dev account Terraform configuration for state backend bootstrap"
+
+  # Push to remote
+  git push origin main
+  ```
+
+- **Acceptance Criteria:**
+  - ✅ Dev configuration files committed to Git
+  - ✅ Changes pushed to GitHub
+
+---
+
+### Story 3.3: Initialize and Apply Dev Bootstrap
 
 - **Title:** Deploy Terraform State Infrastructure in Dev Account
 - **Persona:** As a **Platform Engineer**, I need to run Terraform to create the S3 bucket and DynamoDB table so that the Dev account has state infrastructure ready.
@@ -197,6 +275,8 @@
   ```
 
   #### 3) Initialize Terraform
+
+  NOTE: make sure you're in account/dev
 
   ```bash
   terraform init
@@ -306,7 +386,7 @@
 
 ---
 
-### Story 3.3: Validate Backend with Test Project
+### Story 3.4: Validate Backend with Test Project
 
 - **Title:** Test Remote Backend with Sample Terraform Project
 - **Persona:** As a **Platform Engineer**, I need to verify the state backend works correctly so that I can confidently deploy real infrastructure using it.
@@ -321,11 +401,15 @@
 
 - **Implementation Details:**
 
-  #### 1) Create Test Directory
+  #### 1) Create Test Directory and Set Credentials
 
   ```bash
   mkdir -p ~/test-terraform-backend
   cd ~/test-terraform-backend
+
+  # Ensure AWS credentials are set
+  export AWS_PROFILE=mycompany-dev
+  aws sts get-caller-identity  # Verify correct account
   ```
 
   #### 2) Create Test Configuration
@@ -338,7 +422,8 @@
       key            = "test/vpc/terraform.tfstate"
       region         = "us-east-1"
       encrypt        = true
-      dynamodb_table = "mycompany-terraform-locks"
+      dynamodb_table = "terraform-locks-dev"  # Use actual table name from bootstrap
+      use_lockfile   = true
     }
 
     required_providers {
@@ -417,12 +502,16 @@
 
   #### 6) Verify DynamoDB Lock Behavior
 
-  ```bash
-  # In one terminal, start a long-running operation
-  terraform plan &
+  **Option A: Using terraform console (recommended)**
 
-  # In another terminal, try to run another operation
-  # (should show lock error)
+  ```bash
+  # In Terminal 1, open terraform console (this acquires and holds a lock)
+  terraform console
+  # Leave this running (you'll see a > prompt)
+  ```
+
+  ```bash
+  # In Terminal 2, try to run a plan (should fail with lock error)
   terraform plan
   ```
 
@@ -434,11 +523,49 @@
   Error message: ConditionalCheckFailedException: The conditional request failed
   Lock Info:
     ID:        abc-123-xyz
-    Path:      {company}-terraform-state-dev/test/vpc/terraform.tfstate
-    Operation: OperationTypePlan
-    Who:       your-username@hostname
-    ...
+    Path:      mycompany-terraform-state-dev/test/vpc/terraform.tfstate
+    Operation: OperationTypeApply
+    Who:       your-username@your-hostname
+    Created:   2026-02-14 12:34:56.789 UTC
+
+  Terraform acquires a state lock to protect the state from being written
+  by multiple users at the same time. Please resolve the issue above and try
+  again. For most commands, you can disable locking with the "-lock=false"
+  flag, but this is not recommended.
   ```
+
+  **After verifying:** Type `exit` in Terminal 1 to close terraform console and release the lock.
+
+  **Option B: Check DynamoDB table directly**
+
+  ```bash
+  # While terraform console is running in Terminal 1, check DynamoDB
+  aws dynamodb scan \
+    --table-name mycompany-terraform-locks \
+    --profile mycompany-dev
+
+  # Should show a lock item with LockID matching your state path
+  ```
+
+  **Expected output:**
+
+  ```json
+  {
+    "Items": [
+      {
+        "LockID": {
+          "S": "mycompany-terraform-state-dev/test/vpc/terraform.tfstate-md5"
+        },
+        "Info": {
+          "S": "{...lock information...}"
+        }
+      }
+    ],
+    "Count": 1
+  }
+  ```
+
+  After exiting terraform console, run the scan again - the table should be empty.
 
   #### 7) Clean Up Test Resources
 
@@ -463,23 +590,22 @@
 
 ---
 
-## Phase 2 Checklist
+## Phase 3 Checklist
 
 Complete this checklist before proceeding to Phase 4:
 
-- [ ] `accounts/dev/` configuration files created
+- [ ] Dev account configuration files created (`main.tf`, `providers.tf`, etc.)
+- [ ] Dev configuration committed and pushed to Git
 - [ ] `terraform.tfvars` created with actual Dev account ID
-- [ ] AWS credentials verified for Dev account
-- [ ] `terraform apply` completed successfully
-- [ ] S3 bucket `{company}-terraform-state-dev` exists with versioning/encryption
-- [ ] DynamoDB table `{company}-terraform-locks` created
-- [ ] Backend configuration saved to `BACKEND_CONFIG_DEV.txt`
-- [ ] Test VPC project validated remote backend works
-- [ ] Test resources cleaned up
+- [ ] Terraform initialized without errors
+- [ ] `terraform apply` succeeded and created S3 bucket + DynamoDB table
+- [ ] S3 bucket visible in AWS Console
+- [ ] DynamoDB table visible in AWS Console
+- [ ] Test project successfully uses remote state with locking
 
 ---
 
 **Previous Phase:** [Phase 2 - Create Terraform Module](phase-2-terraform-module.md)  
-**Next Phase:** [Phase 4 - Bootstrap Prod Account](phase-4-bootstrap-prod.md)
+**Next Phase:** [Phase 4 - Bootstrap CI/CD](phase-4-bootstrap-cicd.md)
 
 **Estimated Time:** 30-60 minutes

@@ -1,18 +1,59 @@
-# Terraform Bootstrap - Phase 4: Bootstrap Prod Account
+# Terraform Bootstrap - Phase 5: Bootstrap Prod Account
+
+## Prerequisites
+
+**Required Access:**
+
+- AWS Prod account admin/PowerUser access
+- AWS SSO configured for Prod account
+- Write access to bootstrap repository
+- Ability to create Pull Requests (for CI/CD validation)
+
+**Required Tools:**
+
+- Terraform >= 1.7.0 installed locally
+- AWS CLI v2 installed and configured
+- Git CLI
+- Text editor
+
+**Required Credentials:**
+
+- AWS SSO profile configured: `mycompany-prod`
+- Ability to run `aws sso login --profile mycompany-prod`
+- Verified with `aws sts get-caller-identity`
+
+**Required Information:**
+
+- Prod AWS account ID (12-digit number)
+- Primary region (e.g., `us-east-1`)
+- Confirmation that Prod account is correct (double-check!)
+
+**Previous Phase:** [Phase 4 - Bootstrap CI/CD](phase-4-bootstrap-cicd.md) must be completed
+
+**⚠️ Important:** CI/CD should be running and validating PRs before proceeding
+
+---
 
 ## Overview
 
-**Dev account bootstrap is complete**, now deploy Terraform state infrastructure to the Prod AWS account. This phase creates production-grade state infrastructure with enhanced security controls.
+**Dev account and CI/CD are complete**, now deploy Terraform state infrastructure to the Prod AWS account. With CI/CD in place, your Prod configuration will be automatically validated for quality and security before deployment.
 
 **Duration:** 30-60 minutes
 
 **Who Should Complete This:** Platform engineers with admin access to Prod AWS account
 
+**Benefits of CI/CD First:** Your Prod configuration will be automatically checked for:
+
+- ✅ Terraform formatting and syntax errors
+- ✅ Security misconfigurations (public buckets, missing encryption)
+- ✅ Code quality violations
+- ✅ Best practices compliance
+
 ---
 
-## Feature 4: Bootstrap Prod Account
+## Feature 5: Bootstrap Prod Account
 
-### Story 4.1: Bootstrap Prod Account
+### Story 5.1: Bootstrap Prod Account
 
 - **Title:** Deploy Terraform State Infrastructure in Prod Account
 - **Persona:** As a **Platform Engineer**, I need to create state infrastructure in the Prod account so that production workloads can be managed with Terraform under strict controls.
@@ -153,9 +194,118 @@
 
 ---
 
-## Phase 3 Checklist
+### Story 5.2: Update CI/CD Workflow for Prod
 
-Complete this checklist before proceeding to Phase 4 (optional):
+- **Title:** Add Prod Account to CI/CD Validation Matrix
+- **Persona:** As a **Platform Engineer**, I need to update the CI/CD workflow to validate Prod configuration so that Prod changes get the same quality gates as Dev.
+
+- **Requirements:**
+  - CI/CD workflow updated to include prod in validation matrix
+  - Security scanning runs on prod configuration
+  - Changes committed and tested
+
+- **Why Before Story 5.3?** The CI/CD workflow currently only validates the `dev` account (from Phase 4). We need to add `prod` to the matrix BEFORE creating prod files, otherwise the PR with prod configuration will fail validation (directory doesn't exist in the workflow matrix).
+
+- **Implementation Details:**
+
+  #### 1) Update Validation Workflow
+
+  ```bash
+  # Edit the workflow file
+  vim .github/workflows/validate.yml
+  ```
+
+  **Change the matrix to include prod:**
+
+  ```yaml
+  terraform-validate:
+    name: Terraform Validate
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Add prod now that we're creating it
+        account: [dev, prod] # Changed from [dev]
+    steps:
+      # ... rest of the workflow unchanged
+  ```
+
+  #### 2) Commit CI/CD Update
+
+  ```bash
+  git add .github/workflows/validate.yml
+  git commit -m "Add prod account to CI/CD validation matrix"
+  git push origin main
+  ```
+
+  #### 3) Verify Workflow Updated
+
+  ```bash
+  # Check that the workflow is updated on main branch
+  git log --oneline -1
+  # Should show: "Add prod account to CI/CD validation matrix"
+  ```
+
+- **Acceptance Criteria:**
+  - ✅ CI/CD workflow updated to validate both dev and prod
+  - ✅ Workflow changes committed and pushed to main
+  - ✅ Ready to create prod configuration files in Story 5.3
+
+**Pattern for Future Accounts:** Whenever you add a new account (staging, shared-services, etc.), follow this pattern:
+
+1. Update CI/CD workflow matrix first
+2. Then create the account configuration
+3. This ensures your PR will pass validation
+
+---
+
+### Story 5.3: Commit Prod Configuration
+
+- **Title:** Commit Prod Account Configuration to Version Control
+- **Persona:** As a **Platform Engineer**, I need to commit the Prod configuration to Git so that the team has a record of production bootstrap setup.
+
+- **Requirements:**
+  - Prod account configuration files committed
+  - Changes pushed to remote repository
+  - Team can review Prod setup
+
+- **Implementation Details:**
+
+  #### 1) Review Changes
+
+  ```bash
+  cd mycompany.infra-terraform-bootstrap
+
+  git status
+  # Should show: new file: accounts/prod/
+  ```
+
+  #### 2) Stage and Commit
+
+  ```bash
+  # Stage new Prod configuration
+  git add accounts/prod/
+
+  # Commit with descriptive message
+  git commit -m "Add Prod account Terraform configuration for state backend bootstrap"
+  ```
+
+  #### 3) Push to Remote
+
+  ```bash
+  git push origin main
+  ```
+
+- **Acceptance Criteria:**
+  - ✅ `accounts/prod/` directory committed to Git
+  - ✅ Commit message clearly describes Prod setup
+  - ✅ Changes pushed to GitHub
+  - ✅ Team can clone and view Prod configuration
+
+---
+
+## Phase 4 Checklist
+
+Complete this checklist before proceeding to Phase 5 (optional):
 
 - [ ] `accounts/prod/` configuration created
 - [ ] `terraform.tfvars` updated with Prod account ID
@@ -165,6 +315,7 @@ Complete this checklist before proceeding to Phase 4 (optional):
 - [ ] DynamoDB table created in Prod account (not Dev)
 - [ ] MFA delete enabled (if required for compliance)
 - [ ] Backend configuration saved to `BACKEND_CONFIG_PROD.txt`
+- [ ] Prod configuration committed and pushed to Git
 - [ ] No cross-account resource contamination
 
 ---
@@ -224,16 +375,16 @@ MFA delete requires root user credentials. This is a security feature. Options:
 
 ## Next Steps
 
-After completing Phase 4:
+After completing Phase 5:
 
 1. **Document Backend Configs:** Share `BACKEND_CONFIG_PROD.txt` file with infrastructure teams
 2. **Update CI/CD:** Attach IAM policies to CI/CD service accounts in Prod environment
 3. **Begin Migration:** Start moving existing Prod projects to use remote backends
-4. **Optional:** Proceed to Phase 4 to migrate bootstrap state itself to remote backend
+4. **Optional:** Proceed to Phase 6 to migrate bootstrap state itself to remote backend
 
 ---
 
-**Previous Phase:** [Phase 3 - Bootstrap Dev Account](phase-3-bootstrap-dev.md)  
-**Next Phase:** [Phase 5 - Migrate to Remote State (Optional)](phase-5-migrate-to-remote-state.md)
+**Previous Phase:** [Phase 4 - Bootstrap CI/CD](phase-4-bootstrap-cicd.md)  
+**Next Phase:** [Phase 6 - Migrate to Remote State (Optional)](phase-6-migrate-to-remote-state.md)
 
 **Estimated Time:** 30-60 minutes

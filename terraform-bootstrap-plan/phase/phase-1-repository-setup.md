@@ -1,5 +1,28 @@
 # Terraform Bootstrap - Phase 1: Repository Setup
 
+## Prerequisites
+
+**Required Access:**
+
+- GitHub organization admin/owner access (to create repositories)
+- Or permission to create repositories in your organization
+
+**Required Tools:**
+
+- Git CLI installed and configured
+- GitHub CLI (`gh`) installed (optional, but recommended)
+- Text editor (VS Code, vim, etc.)
+
+**Required Knowledge:**
+
+- Basic Git commands (clone, commit, push)
+- GitHub repository creation
+- Markdown syntax (for README)
+
+**Previous Phase:** [Phase 0 - Prerequisites](phase-0-prerequisites.md) must be completed
+
+---
+
 ## Overview
 
 **Before deploying state infrastructure**, you need to create the repository structure with proper Git configuration. This phase establishes the foundation for the bootstrap project.
@@ -132,7 +155,7 @@ EOF
 
 Create a file named `README.md` in the root of the repository and paste the following content:
 
-````markdown
+````
 # Terraform Bootstrap
 
 **Purpose:** One-time setup to create Terraform state infrastructure (S3 + DynamoDB) for Dev and Prod AWS accounts.
@@ -151,8 +174,8 @@ After bootstrap, all other infrastructure projects use the remote S3 backend.
 mycompany.infra-terraform-bootstrap/
 ├── modules/terraform-state-backend/ # Reusable module
 └── accounts/ # Account-specific configs
-├── dev/
-└── prod/
+   ├── dev/
+   └── prod/
 
 ## Modules
 
@@ -194,21 +217,37 @@ module "terraform_backend" {
 - `iam_policy_arn` - IAM policy ARN for CI/CD
 - `backend_config` - Complete backend configuration
 
-````
-
-#### 3) Commit Files
-
-```bash
-git add .
-git commit -m "Add Terraform state backend module and documentation"
-git push -u origin main
-````
-
 - **Acceptance Criteria:**
   - ✅ `.gitignore` excludes `*.tfstate`, `*.tfvars`, `.terraform/`
   - ✅ `.gitignore` allows `*.tfvars.example`
   - ✅ Root `README.md` documents purpose, structure, and quick start
-  - ✅ Files committed and pushed to GitHub
+  - ✅ No sensitive files in Git history
+
+---
+
+### Story 1.3: Commit Repository Files
+
+- **Title:** Version Control Initial Configuration Files
+- **Persona:** As a **Platform Engineer**, I need to commit the `.gitignore` and `README.md` to Git so that the repository configuration is tracked and team members have documentation.
+
+- **Requirements:**
+  - Files staged for commit
+  - Descriptive commit message
+  - Changes pushed to remote repository
+
+- **Implementation Details:**
+
+  #### 1) Stage and Commit
+
+  ```bash
+  git add .
+  git commit -m "Add Terraform state backend module and documentation"
+  git push -u origin main
+  ```
+
+- **Acceptance Criteria:**
+  - ✅ Configuration files committed to Git
+  - ✅ Changes pushed to GitHub
   - ✅ No sensitive files in Git history
 
 ---

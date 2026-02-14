@@ -1,8 +1,39 @@
 # Terraform Bootstrap - Phase 2: Create Terraform Module
 
+## Prerequisites
+
+**Required Access:**
+
+- Write access to bootstrap repository (from Phase 1)
+- Local clone of the repository
+
+**Required Tools:**
+
+- Terraform >= 1.7.0 (verify with `terraform version`)
+- Text editor with HCL syntax highlighting (VS Code recommended)
+- Git CLI
+
+**Required Knowledge:**
+
+- Terraform module structure and syntax
+- HCL (HashiCorp Configuration Language)
+- AWS resource naming conventions
+- Basic understanding of S3 and DynamoDB
+
+**Previous Phase:** [Phase 1 - Repository Setup](phase-1-repository-setup.md) must be completed
+
+---
+
 ## Overview
 
 **With the repository initialized**, you now need to create a reusable Terraform module that defines the state backend infrastructure. This module will be used by each account to create their S3 bucket and DynamoDB table.
+
+**Important Regional Notes:**
+
+- This module creates **one S3 bucket** and **one DynamoDB table per account**
+- You will deploy it **once per account**, not once per region
+- The bucket will be created in your primary region (typically `us-east-1`)
+- All Terraform projects across all regions in that account will use this bucket
 
 **Duration:** 30-45 minutes
 
@@ -26,7 +57,17 @@
 
 - **Implementation Details:**
 
-  #### 1) Create `modules/terraform-state-backend/variables.tf`
+  #### 1) Create files
+
+  ```bash
+  touch modules/terraform-state-backend/variables.tf
+  touch modules/terraform-state-backend/outputs.tf
+  touch modules/terraform-state-backend/s3.tf
+  touch modules/terraform-state-backend/dynamo.tf
+  touch modules/terraform-state-backend/iam.tf
+  ```
+
+  #### 2) Create `modules/terraform-state-backend/variables.tf`
 
   ```hcl
   variable "bucket_name" {
@@ -101,13 +142,7 @@
   }
   ```
 
-  #### 3) Create `modules/terraform-state-backend/main.tf`
-
-  ```bash
-  touch modules/terraform-state-backend/variables.tf
-  touch modules/terraform-state-backend/outputs.tf
-  touch modules/terraform-state-backend/main.tf
-  ```
+  #### 4) Create `modules/terraform-state-backend/s3.tf`
 
   ```hcl
   # S3 Bucket for Terraform State
@@ -162,12 +197,19 @@
       id     = "expire-old-versions"
       status = "Enabled"
 
+      filter {} # Apply to all objects
+
       noncurrent_version_expiration {
         noncurrent_days = 90
       }
     }
   }
 
+  ```
+
+  #### 5) Create `modules/terraform-state-backend/dynamo.tf`
+
+  ```hcl
   # DynamoDB Table for State Locking
   resource "aws_dynamodb_table" "terraform_locks" {
     name         = var.lock_table_name
@@ -188,6 +230,11 @@
       }
     )
   }
+  ```
+
+  #### 6) Create `modules/terraform-state-backend/iam.tf`
+
+  ```hcl
 
   # IAM Policy for Terraform State Access
   resource "aws_iam_policy" "terraform_state_access" {
@@ -227,14 +274,6 @@
   }
   ```
 
-  #### 4) Commit Module Files
-
-  ```bash
-  git add modules/terraform-state-backend/
-  git commit -m "Add Terraform state backend module"
-  git push origin main
-  ```
-
 - **Technical Requirements:**
   - Terraform >= 1.0
   - AWS Provider ~> 5.0
@@ -242,13 +281,38 @@
   - DynamoDB table uses `LockID` as partition key (required by Terraform)
 
 - **Acceptance Criteria:**
-  - ✅ `modules/terraform-state-backend/main.tf` creates S3 bucket with versioning
-  - ✅ `modules/terraform-state-backend/main.tf` creates DynamoDB table with `LockID` key
-  - ✅ `modules/terraform-state-backend/main.tf` creates IAM policy
+  - ✅ `modules/terraform-state-backend/s3.tf` creates S3 bucket with versioning
+  - ✅ `modules/terraform-state-backend/dynamo.tf` creates DynamoDB table with `LockID` key
+  - ✅ `modules/terraform-state-backend/iam.tf` creates IAM policy
   - ✅ `variables.tf` includes validation for bucket name and environment
   - ✅ `outputs.tf` exports all necessary values
   - ✅ Root `README.md` includes module documentation
-  - ✅ Module files committed and pushed to GitHub
+
+---
+
+### Story 2.2: Commit Terraform Module
+
+- **Title:** Version Control State Backend Module
+- **Persona:** As a **Platform Engineer**, I need to commit the Terraform module to Git so that it's version-controlled and can be used by account configurations.
+
+- **Requirements:**
+  - Module files staged for commit
+  - Descriptive commit message
+  - Changes pushed to remote repository
+
+- **Implementation Details:**
+
+  #### 1) Stage and Commit
+
+  ```bash
+  git add modules/terraform-state-backend/
+  git commit -m "Add Terraform state backend module"
+  git push origin main
+  ```
+
+- **Acceptance Criteria:**
+  - ✅ Module files committed to Git
+  - ✅ Changes pushed to GitHub
 
 ---
 

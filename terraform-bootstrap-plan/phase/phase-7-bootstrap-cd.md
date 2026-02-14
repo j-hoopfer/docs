@@ -1,365 +1,71 @@
-# Phase 6: Bootstrap Project CI/CD
+# Phase 7: Continuous Deployment (Bootstrap Automation)
 
-**Purpose:** Set up automated validation and deployment for the bootstrap project itself to ensure quality, security, and enable future changes.
+## Prerequisites
 
-**Estimated Time:** 45-60 minutes
+**Required Access:**
 
-**Prerequisites:**
+- GitHub repository admin access (to create workflows)
+- AWS Dev and Prod account access (to create OIDC providers)
+- Permission to create IAM roles and policies
 
-- Phase 1, 2, 3, and 4 completed (bootstrap infrastructure exists in dev/prod)
-- Phase 5 completed or decision made to keep local state
-- GitHub repository created for `mycompany.infra-terraform-bootstrap`
-- Basic understanding of GitHub Actions (or your CI/CD platform)
+**Required Tools:**
+
+- Git CLI
+- Terraform >= 1.7.0
+- AWS CLI configured with SSO profiles
+- Text editor (VS Code with YAML extension recommended)
+
+**Required Knowledge:**
+
+- GitHub Actions OIDC authentication
+- IAM roles and trust policies
+- Terraform remote state for this bootstrap project
+- GitHub Environments for approval workflows
+
+**Required Accounts/Services:**
+
+- GitHub account with Actions enabled
+- AWS Dev and Prod accounts with remote state configured
+
+**Previous Phase:** [Phase 6 - Migrate to Remote State](phase-6-migrate-to-remote-state.md) must be completed
+
+**⚠️ Critical:** This phase requires remote state (Phase 6) to be completed. Local state does not support automated deployments safely.
 
 ---
 
 ## Overview
 
-While the bootstrap project is "low-churn" infrastructure that rarely changes, having CI/CD provides critical benefits:
+**Purpose:** Automate Terraform deployments for the bootstrap project using GitHub Actions with OIDC authentication. This eliminates manual `terraform apply` commands while maintaining security and audit trails.
 
-**Stage 1: Validation CI (Implement First)**
+**Estimated Time:** 60-90 minutes
 
-- Linting and formatting checks
-- Terraform validation
-- Security scanning (Checkov, tfsec)
-- Cost estimation (Infracost - optional)
-- Runs on every Pull Request
+**Why After Remote State?** Automated deployments require:
 
-**Stage 2: Deployment CI (After Phase 5 Remote State Migration)**
+- ✅ Remote state for concurrent access and locking
+- ✅ State backend for GitHub Actions to read/write state
+- ✅ Proper state locking to prevent conflicts
+- ✅ Audit trail of all state changes
 
-- Automated `terraform apply` on merge to main
-- OIDC authentication (no long-lived credentials)
-- Drift detection
-- Runs only after manual validation succeeds
+**Why Optional?** Continuous Deployment adds:
 
-**Benefits:**
+- **Automation** - Changes deploy automatically on merge to main
+- **Consistency** - No human error in manual deployments
+- **Speed** - Faster iteration cycle
+- **Audit** - Complete trail of who deployed what and when
 
-- **Code Quality** - Catch formatting and syntax errors before manual execution
-- **Security** - Detect misconfigurations (missing encryption, public buckets)
-- **Drift Detection** - Alert if someone manually modifies resources in AWS Console
-- **Scaling** - Easy to add new accounts (staging, shared-services) via automation
-- **Audit Trail** - All changes tracked through Git and CI/CD logs
+However, manual deployments are perfectly acceptable for low-churn bootstrap infrastructure.
 
 ---
 
-## Stage 1: Validation CI (Safe for Local State)
+## Features
 
-This stage works **whether you've completed Phase 5 or not** because it only validates code without modifying infrastructure.
+### Feature 1: OIDC Authentication Setup
 
-### Feature 1: Terraform Validation Workflow
-
-#### User Story 1.1: Create Validation Workflow
+#### User Story 1.1: Create OIDC Provider for Bootstrap
 
 **As a:** Platform Engineer  
-**I want to:** Automatically validate Terraform code on every Pull Request  
-**So that:** Errors are caught before manual execution
-
-**Acceptance Criteria:**
-
-- Workflow runs on PR creation and updates
-- Checks formatting, syntax, and security
-- Fails PR if issues are found
-- Runs without AWS credentials (no state access needed)
-
-#### Implementation
-
-**Create GitHub Actions Workflow:**
-
-```yaml
-# .github/workflows/validate.yml
-name: Terraform Validation
-
-on:
-  pull_request:
-    branches: [main]
-    paths:
-      - "modules/**/*.tf"
-      - "accounts/**/*.tf"
-      - ".github/workflows/validate.yml"
-  push:
-    branches: [main]
-    paths:
-      - "modules/**/*.tf"
-      - "accounts/**/*.tf"
-
-jobs:
-  terraform-fmt:
-    name: Terraform Format Check
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.7.4
-
-      - name: Terraform Format Check
-        run: |
-          echo "Checking Terraform formatting..."
-          terraform fmt -check -recursive
-
-      - name: Format Check Failed - Suggest Fix
-        if: failure()
-        run: |
-          echo "❌ Terraform formatting issues detected!"
-          echo "Run locally to fix: terraform fmt -recursive"
-
-  terraform-validate:
-    name: Terraform Validate
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        account: [dev, prod]
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.7.4
-
-      - name: Terraform Init (No Backend)
-        working-directory: accounts/${{ matrix.account }}
-        run: |
-          # Initialize without backend configuration (validation only)
-          terraform init -backend=false
-
-      - name: Terraform Validate
-        working-directory: accounts/${{ matrix.account }}
-        run: terraform validate
-
-  security-scan:
-    name: Security Scan (Checkov)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Run Checkov
-        uses: bridgecrewio/checkov-action@v12
-        with:
-          directory: .
-          framework: terraform
-          output_format: cli
-          soft_fail: false # Fail build on security issues
-          download_external_modules: false
-
-      - name: Security Scan Failed
-        if: failure()
-        run: |
-          echo "❌ Security issues detected!"
-          echo "Review Checkov output above and fix issues"
-          echo "Common issues:"
-          echo "  - S3 bucket without encryption"
-          echo "  - S3 bucket without versioning"
-          echo "  - DynamoDB table without encryption"
-          echo "  - Missing tags"
-
-  docs-check:
-    name: Documentation Check
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Check README Exists
-        run: |
-          if [ ! -f "README.md" ]; then
-            echo "❌ README.md is required"
-            exit 1
-          fi
-
-      - name: Check Module Documentation
-        run: |
-          for module in modules/*/; do
-            if [ ! -f "${module}README.md" ]; then
-              echo "❌ Missing README.md in ${module}"
-              exit 1
-            fi
-          done
-          echo "✅ All modules have documentation"
-```
-
-**Create PR to Test Workflow:**
-
-```bash
-cd ~/mycompany.infra-terraform-bootstrap
-
-# Create test branch
-git checkout -b test-validation-ci
-
-# Add workflow file
-mkdir -p .github/workflows
-cat > .github/workflows/validate.yml << 'EOF'
-# (paste workflow above)
-EOF
-
-# Commit and push
-git add .github/workflows/validate.yml
-git commit -m "Add validation CI workflow"
-git push origin test-validation-ci
-```
-
-**Open PR on GitHub and verify:**
-
-- ✅ Format check runs and passes
-- ✅ Validation runs for dev and prod accounts
-- ✅ Security scan runs (may fail if you haven't enabled encryption)
-- ✅ Documentation check passes
-
----
-
-### Feature 2: Enhanced Security Scanning
-
-#### User Story 2.1: Add tfsec Security Scanner
-
-**As a:** Platform Engineer  
-**I want to:** Use multiple security scanners for comprehensive coverage  
-**So that:** No security misconfigurations slip through
-
-**Acceptance Criteria:**
-
-- tfsec scanner added alongside Checkov
-- Both scanners run on every PR
-- Results formatted clearly in PR comments
-
-#### Implementation
-
-**Add tfsec to Validation Workflow:**
-
-```yaml
-# Add this job to .github/workflows/validate.yml
-
-tfsec-scan:
-  name: Security Scan (tfsec)
-  runs-on: ubuntu-latest
-  steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-
-    - name: Run tfsec
-      uses: aquasecurity/tfsec-action@v1.0.3
-      with:
-        soft_fail: false
-        format: default
-        additional_args: --minimum-severity MEDIUM
-
-    - name: tfsec Results
-      if: always()
-      run: |
-        echo "See tfsec results above"
-        echo "Docs: https://aquasecurity.github.io/tfsec"
-```
-
----
-
-### Feature 3: Cost Estimation (Optional)
-
-#### User Story 3.1: Add Infracost for Cost Awareness
-
-**As a:** Platform Engineer  
-**I want to:** See estimated AWS costs for infrastructure changes  
-**So that:** I can make informed decisions about resource sizing
-
-**Acceptance Criteria:**
-
-- Infracost runs on every PR
-- Posts comment with cost breakdown
-- Highlights cost increases/decreases
-
-#### Implementation
-
-**Add Infracost Workflow:**
-
-```yaml
-# .github/workflows/infracost.yml
-name: Infracost
-
-on:
-  pull_request:
-    branches: [main]
-    paths:
-      - "modules/**/*.tf"
-      - "accounts/**/*.tf"
-
-jobs:
-  infracost:
-    name: Cost Estimation
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.7.4
-
-      - name: Setup Infracost
-        uses: infracost/actions/setup@v3
-        with:
-          api-key: ${{ secrets.INFRACOST_API_KEY }}
-
-      - name: Generate Infracost JSON
-        run: |
-          # Bootstrap infrastructure costs are minimal
-          # Focus on S3 storage and DynamoDB
-          infracost breakdown \
-            --path=modules/terraform-state-backend \
-            --format=json \
-            --out-file=/tmp/infracost.json
-
-      - name: Post Infracost Comment
-        uses: infracost/actions/comment@v2
-        with:
-          path: /tmp/infracost.json
-          behavior: update
-```
-
-**Setup Infracost:**
-
-1. Sign up at https://www.infracost.io/
-2. Get API key from dashboard
-3. Add to GitHub Secrets: `Settings` → `Secrets and variables` → `Actions` → `New repository secret`
-   - Name: `INFRACOST_API_KEY`
-   - Value: Your API key
-
-**Expected Output in PR:**
-
-```
-💰 Infracost Estimate
-
-Monthly cost estimate: ~$1.50
-
-S3 Bucket (Standard storage):
-  • First 50 TB: ~$0.50
-  • Versioning overhead: ~$0.50
-
-DynamoDB Table (On-demand):
-  • State locking: ~$0.25 (1M requests)
-  • Storage: ~$0.25 (1 GB)
-```
-
----
-
-## Stage 2: Deployment CI (Requires Phase 5 - Remote State)
-
-**⚠️ Important:** Only implement this stage **after completing Phase 5** (migrating bootstrap state to remote). If using local state, skip this section.
-
-### Feature 4: Automated Deployment with OIDC
-
-#### User Story 4.1: Create OIDC Provider for Bootstrap
-
-**As a:** Platform Engineer  
-**I want to:** Allow GitHub Actions to deploy bootstrap changes  
-**So that:** The bootstrap infrastructure can be updated automatically
+**I want to:** Allow GitHub Actions to deploy bootstrap changes using OIDC  
+**So that:** Deployments are secure without long-lived credentials
 
 **Acceptance Criteria:**
 
@@ -367,12 +73,13 @@ DynamoDB Table (On-demand):
 - IAM role created for GitHub Actions
 - Role has permissions to manage state bucket and DynamoDB table
 - Workflow can assume role without long-lived credentials
+- Trust policy restricts access to specific GitHub repository
 
 #### Implementation
 
-**Create OIDC Provider (One-time per account):**
+**1) Add OIDC Resources to Terraform Module:**
 
-Since the bootstrap project creates IAM resources, we need to add the OIDC provider to the bootstrap module itself.
+Create a new file in the bootstrap module:
 
 ```hcl
 # modules/terraform-state-backend/oidc.tf (NEW FILE)
@@ -425,7 +132,7 @@ resource "aws_iam_role" "github_actions_bootstrap" {
           }
           StringLike = {
             # IMPORTANT: Replace with your actual GitHub org/repo
-            "token.actions.githubusercontent.com:sub" = "repo:mycompany/mycompany.infra-terraform-bootstrap:*"
+            "token.actions.githubusercontent.com:sub" = "repo:${var.github_org}/${var.github_repo}:*"
           }
         }
       }
@@ -513,7 +220,7 @@ resource "aws_iam_role_policy" "github_bootstrap_state_management" {
 }
 ```
 
-**Add Variable to Module:**
+**2) Add Variables to Module:**
 
 ```hcl
 # modules/terraform-state-backend/variables.tf
@@ -523,9 +230,21 @@ variable "enable_github_oidc" {
   type        = bool
   default     = false
 }
+
+variable "github_org" {
+  description = "GitHub organization name for OIDC trust policy"
+  type        = string
+  default     = ""
+}
+
+variable "github_repo" {
+  description = "GitHub repository name for OIDC trust policy"
+  type        = string
+  default     = ""
+}
 ```
 
-**Add Output:**
+**3) Add Output:**
 
 ```hcl
 # modules/terraform-state-backend/outputs.tf
@@ -536,7 +255,7 @@ output "github_actions_role_arn" {
 }
 ```
 
-**Enable OIDC in Account Configurations:**
+**4) Enable OIDC in Account Configurations:**
 
 ```hcl
 # accounts/dev/main.tf
@@ -544,10 +263,12 @@ output "github_actions_role_arn" {
 module "terraform_state_backend" {
   source = "../../modules/terraform-state-backend"
 
-  environment      = "dev"
-  primary_region   = "us-east-1"
-  project_name     = "mycompany"
-  enable_github_oidc = true  # ADD THIS
+  environment        = "dev"
+  primary_region     = "us-east-1"
+  project_name       = "mycompany"
+  enable_github_oidc = true  # Enable OIDC
+  github_org         = "mycompany"
+  github_repo        = "mycompany.infra-terraform-bootstrap"
 
   tags = {
     Environment = "dev"
@@ -557,7 +278,28 @@ module "terraform_state_backend" {
 }
 ```
 
-**Apply the Changes:**
+```hcl
+# accounts/prod/main.tf
+
+module "terraform_state_backend" {
+  source = "../../modules/terraform-state-backend"
+
+  environment        = "prod"
+  primary_region     = "us-east-1"
+  project_name       = "mycompany"
+  enable_github_oidc = true  # Enable OIDC
+  github_org         = "mycompany"
+  github_repo        = "mycompany.infra-terraform-bootstrap"
+
+  tags = {
+    Environment = "prod"
+    ManagedBy   = "Terraform"
+    Project     = "bootstrap"
+  }
+}
+```
+
+**5) Apply the Changes:**
 
 ```bash
 # Dev account
@@ -565,21 +307,35 @@ cd ~/mycompany.infra-terraform-bootstrap/accounts/dev
 terraform plan
 terraform apply
 
+# Capture the role ARN from output
+terraform output github_actions_role_arn
+
 # Prod account
 cd ~/mycompany.infra-terraform-bootstrap/accounts/prod
 terraform plan
 terraform apply
+
+# Capture the role ARN from output
+terraform output github_actions_role_arn
 ```
 
-**Verify OIDC Provider:**
+**6) Verify OIDC Provider:**
 
 ```bash
+# Check OIDC provider exists
 aws iam list-open-id-connect-providers --profile mycompany-dev
+
+# Check IAM role exists
+aws iam get-role \
+  --role-name mycompany-github-actions-bootstrap \
+  --profile mycompany-dev
 ```
 
 ---
 
-#### User Story 4.2: Create Deployment Workflow
+### Feature 2: Automated Deployment Workflow
+
+#### User Story 2.1: Create Deployment Workflow
 
 **As a:** Platform Engineer  
 **I want to:** Automatically apply Terraform changes on merge to main  
@@ -591,10 +347,18 @@ aws iam list-open-id-connect-providers --profile mycompany-dev
 - Uses OIDC to assume IAM role
 - Runs `terraform plan` and `terraform apply`
 - Sends notifications on failure
+- Prod deployments require manual approval
 
 #### Implementation
 
-**Create Deployment Workflow:**
+**1) Create Deployment Workflow:**
+
+```bash
+cd ~/mycompany.infra-terraform-bootstrap
+touch .github/workflows/deploy.yml
+```
+
+**2) Add Deployment Workflow Content:**
 
 ```yaml
 # .github/workflows/deploy.yml
@@ -621,7 +385,7 @@ jobs:
   deploy-dev:
     name: Deploy to Dev
     runs-on: ubuntu-latest
-    environment: dev # GitHub Environment for manual approval (optional)
+    environment: dev # GitHub Environment for optional approval
 
     steps:
       - name: Checkout Code
@@ -630,7 +394,7 @@ jobs:
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::123456789012:role/mycompany-github-actions-bootstrap
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActions-Bootstrap-${{ github.run_id }}
 
@@ -678,8 +442,9 @@ jobs:
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::987654321098:role/mycompany-github-actions-bootstrap
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_PROD }}
           aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Bootstrap-${{ github.run_id }}
 
       - name: Verify AWS Identity
         run: aws sts get-caller-identity
@@ -695,49 +460,92 @@ jobs:
 
       - name: Terraform Plan
         working-directory: accounts/prod
-        run: terraform plan -out=tfplan
+        run: |
+          terraform plan -out=tfplan
+          terraform show -no-color tfplan > plan.txt
 
       - name: Terraform Apply
         working-directory: accounts/prod
         run: terraform apply -auto-approve tfplan
+
+      - name: Notify on Success
+        run: |
+          echo "✅ Production deployment successful!"
+          echo "Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 ```
 
-**Configure GitHub Environments (for manual approval on prod):**
-
-1. Go to GitHub repository → `Settings` → `Environments`
-2. Create environment: `prod`
-3. Add protection rule: `Required reviewers` → Add yourself
-4. Now prod deployments require manual approval
-
-**Test the Workflow:**
+**3) Add GitHub Secrets:**
 
 ```bash
-# Make a small change
-cd ~/mycompany.infra-terraform-bootstrap
-git checkout main
-git pull
+# Get role ARNs from Terraform outputs
+cd ~/mycompany.infra-terraform-bootstrap/accounts/dev
+DEV_ROLE_ARN=$(terraform output -raw github_actions_role_arn)
 
-# Example: Add a tag to the module
-vim accounts/dev/main.tf
-# Add: LastUpdated = "2026-02-14"
+cd ../prod
+PROD_ROLE_ARN=$(terraform output -raw github_actions_role_arn)
 
-git add accounts/dev/main.tf
-git commit -m "Add LastUpdated tag for testing deployment workflow"
-git push origin main
+echo "Dev Role ARN: $DEV_ROLE_ARN"
+echo "Prod Role ARN: $PROD_ROLE_ARN"
 ```
 
-**Verify:**
+Then add to GitHub:
+
+1. Go to GitHub repository → `Settings` → `Secrets and variables` → `Actions`
+2. Click `New repository secret`
+3. Add `AWS_ROLE_ARN_DEV` with the dev role ARN
+4. Add `AWS_ROLE_ARN_PROD` with the prod role ARN
+
+**4) Configure GitHub Environments:**
+
+**For Prod (Manual Approval Required):**
+
+1. Go to GitHub repository → `Settings` → `Environments`
+2. Click `New environment` → Name: `prod`
+3. Check `Required reviewers`
+4. Add yourself or your team as reviewers
+5. Click `Save protection rules`
+
+**For Dev (Optional - Immediate Deployment):**
+
+1. Create environment: `dev`
+2. Leave protection rules empty for automatic deployment
+3. Or add approval for additional safety
+
+**5) Commit and Test:**
+
+```bash
+cd ~/mycompany.infra-terraform-bootstrap
+
+# Create feature branch
+git checkout -b add-cd-workflow
+
+# Add workflow
+git add .github/workflows/deploy.yml
+git commit -m "Add continuous deployment workflow with OIDC"
+git push origin add-cd-workflow
+
+# Create PR
+gh pr create \
+  --title "Add continuous deployment workflow" \
+  --body "Enables automated deployments with OIDC authentication"
+
+# Merge PR (after CI passes)
+# Then verify deployment workflow runs on main
+```
+
+**6) Verify Deployment:**
 
 - ✅ Workflow triggers on push to main
 - ✅ Dev deployment runs automatically
 - ✅ Prod deployment waits for approval
 - ✅ Changes applied successfully
+- ✅ AWS resources match Terraform code
 
 ---
 
-### Feature 5: Drift Detection
+### Feature 3: Drift Detection
 
-#### User Story 5.1: Daily Drift Detection
+#### User Story 3.1: Daily Drift Detection
 
 **As a:** Platform Engineer  
 **I want to:** Detect when someone manually modifies bootstrap resources  
@@ -745,14 +553,20 @@ git push origin main
 
 **Acceptance Criteria:**
 
-- Runs daily at 9 AM
+- Runs daily at 9 AM UTC
 - Compares actual AWS resources to Terraform state
-- Alerts on differences
+- Creates GitHub issue on drift detection
 - Does not modify resources
 
 #### Implementation
 
-**Create Drift Detection Workflow:**
+**1) Create Drift Detection Workflow:**
+
+```bash
+touch .github/workflows/drift-detection.yml
+```
+
+**2) Add Drift Detection Workflow Content:**
 
 ```yaml
 # .github/workflows/drift-detection.yml
@@ -784,7 +598,7 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::123456789012:role/mycompany-github-actions-bootstrap
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Terraform
@@ -855,7 +669,7 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::987654321098:role/mycompany-github-actions-bootstrap
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_PROD }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Terraform
@@ -917,65 +731,77 @@ jobs:
             });
 ```
 
-**Test Drift Detection Manually:**
+**3) Test Drift Detection:**
 
 ```bash
-# Trigger workflow manually from GitHub Actions UI
-# Or wait for daily cron run
-```
-
-**Simulate Drift for Testing:**
-
-```bash
-# Manually add a tag to the S3 bucket in AWS Console
+# Simulate drift by manually modifying a resource
 aws s3api put-bucket-tagging \
   --bucket mycompany-terraform-state-dev \
   --tagging 'TagSet=[{Key=ManualTag,Value=TestDrift}]' \
   --profile mycompany-dev
 
-# Trigger drift detection
-# Should create GitHub issue showing the tag addition
+# Trigger workflow manually
+gh workflow run drift-detection.yml
+
+# Check for GitHub issue creation
+gh issue list --label drift-detection
 ```
 
 ---
 
 ## Validation
 
-After completing Phase 6, verify:
-
-**Stage 1 (Validation CI):**
-
-- ✅ `validate.yml` workflow exists and runs on PRs
-- ✅ Format check catches unformatted code
-- ✅ Terraform validate runs for all accounts
-- ✅ Security scan (Checkov/tfsec) runs and passes
-- ✅ PRs are blocked if validation fails
-
-**Stage 2 (Deployment CI):**
+**Continuous Deployment Verification:**
 
 - ✅ OIDC provider exists in dev and prod accounts
 - ✅ IAM role created with correct trust policy
-- ✅ `deploy.yml` workflow runs on merge to main
-- ✅ Dev deployment runs automatically
+- ✅ GitHub Secrets configured with role ARNs
+- ✅ `deploy.yml` workflow exists
+- ✅ Dev deployment runs automatically on merge
 - ✅ Prod deployment requires manual approval
-- ✅ Drift detection runs daily and creates issues
+- ✅ Changes applied successfully to AWS
+
+**Drift Detection Verification:**
+
+- ✅ `drift-detection.yml` workflow exists
+- ✅ Workflow runs on schedule (daily at 9 AM)
+- ✅ Can be triggered manually
+- ✅ Creates GitHub issue when drift detected
+- ✅ Does not modify resources
 
 **Test End-to-End:**
 
 ```bash
-# 1. Create test branch
-git checkout -b test-end-to-end
-echo "# Test" >> accounts/dev/README.md
+# 1. Make a small change
+git checkout main
+git pull
+vim accounts/dev/main.tf
+# Add a new tag: TestCD = "true"
 
 # 2. Commit and push
-git add .
-git commit -m "Test: End-to-end CI/CD workflow"
-git push origin test-end-to-end
+git add accounts/dev/main.tf
+git commit -m "Test: Continuous deployment workflow"
+git push origin main
 
-# 3. Open PR - verify validation runs
-# 4. Merge PR - verify deployment runs
-# 5. Check AWS Console - verify changes applied
-# 6. Manually modify resource - verify drift detection
+# 3. Verify workflow runs
+gh run list --workflow=deploy.yml
+
+# 4. Check AWS Console - verify changes applied
+aws s3api get-bucket-tagging \
+  --bucket mycompany-terraform-state-dev \
+  --profile mycompany-dev
+
+# 5. Simulate drift and verify detection
+aws s3api put-bucket-tagging \
+  --bucket mycompany-terraform-state-dev \
+  --tagging 'TagSet=[{Key=DriftTest,Value=Manual}]' \
+  --profile mycompany-dev
+
+# 6. Trigger drift detection
+gh workflow run drift-detection.yml
+
+# 7. Verify issue created
+gh issue list --label drift-detection
 ```
 
 ---
@@ -996,37 +822,55 @@ Not authorized to perform sts:AssumeRoleWithWebIdentity
 **Fix:**
 
 ```hcl
-# Check trust policy in modules/terraform-state-backend/oidc.tf
-# Ensure it matches: "repo:YOUR-ORG/YOUR-REPO:*"
-"token.actions.githubusercontent.com:sub" = "repo:mycompany/mycompany.infra-terraform-bootstrap:*"
+# Verify github_org and github_repo variables match your actual repository
+# accounts/dev/main.tf
+module "terraform_state_backend" {
+  # ...
+  github_org  = "mycompany"  # Your GitHub organization
+  github_repo = "mycompany.infra-terraform-bootstrap"  # Exact repo name
+}
 ```
 
 ---
 
-### Issue: Terraform Init Fails in CI
+### Issue: Deployment Fails - State Locked
 
 **Error:**
 
 ```
-Error: Failed to get existing workspaces: S3 bucket does not exist
+Error: Error acquiring the state lock
+Lock Info:
+  ID:        abc123
+  Path:      mycompany-terraform-state-dev/dev/terraform.tfstate
 ```
 
-**Cause:** Workflow running before Phase 5 (remote state migration) completed.
+**Cause:** Another deployment or manual `terraform apply` is running.
 
 **Fix:**
 
-- Complete Phase 5 first, OR
-- Use validation workflow only (Stage 1), skip deployment workflow (Stage 2)
+Wait for the other operation to complete, or force-unlock if it's stuck:
+
+```bash
+# Check who has the lock
+aws dynamodb get-item \
+  --table-name mycompany-terraform-locks-dev \
+  --key '{"LockID": {"S": "mycompany-terraform-state-dev/dev/terraform.tfstate-md5"}}' \
+  --profile mycompany-dev
+
+# Force unlock (use with caution)
+cd accounts/dev
+terraform force-unlock abc123
+```
 
 ---
 
 ### Issue: Drift Detection Creates Duplicate Issues
 
-**Cause:** Workflow runs daily and creates new issue each time.
+**Cause:** Workflow runs daily and creates new issue each time drift persists.
 
 **Fix:**
 
-Enhance drift detection workflow to check for existing open issues:
+Enhance drift detection to check for existing open issues before creating new ones:
 
 ```yaml
 - name: Check for Existing Drift Issue
@@ -1044,6 +888,7 @@ Enhance drift detection workflow to check for existing open issues:
 
 - name: Create Issue Only if None Exists
   if: steps.plan.outputs.exitcode == '2' && steps.existing.outputs.result == 'false'
+  uses: actions/github-script@v7
   # ... create issue
 ```
 
@@ -1056,57 +901,66 @@ Enhance drift detection workflow to check for existing open issues:
 - Use least-privilege - role can only modify bootstrap resources
 - Scoped to primary region only
 - Cannot modify resources outside bootstrap project
+- Trust policy restricted to specific GitHub repository
 
 **Secret Management:**
 
 - Never store AWS credentials in GitHub Secrets
 - Use OIDC for authentication (no long-lived keys)
 - Rotate OIDC thumbprints annually
+- Store only role ARNs in secrets (not credentials)
 
 **Audit Trail:**
 
 - All deployments logged in GitHub Actions
 - CloudTrail logs all AWS API calls from CI/CD role
 - DynamoDB lock table shows who acquired locks and when
+- GitHub provides complete history of who approved prod deployments
 
 **Branch Protection:**
+
+Ensure main branch is protected:
 
 ```
 Repository Settings → Branches → Add rule for 'main':
 - ✅ Require pull request before merging
-- ✅ Require status checks to pass (validation workflow)
+- ✅ Require status checks to pass (all CI workflows)
 - ✅ Require conversation resolution
 - ✅ Require signed commits (optional)
 - ✅ Include administrators
+- ✅ Require linear history
 ```
 
 ---
 
 ## Cost Impact
 
-**CI/CD Costs:**
+**Additional Costs:**
 
-- GitHub Actions: Free for public repos, ~$0.008/minute for private repos
-- Validation workflows: ~2 minutes per PR = ~$0.02 per PR
-- Deployment workflows: ~3 minutes per deployment = ~$0.03 per deployment
+- Deployment workflows: ~3 minutes per deployment = ~$0.03
 - Drift detection: ~2 minutes daily = ~$5/month for both accounts
+- OIDC provider: Free
+- IAM role: Free
 
-**Expected Total:** ~$10-15/month for private repositories
+**Expected Total:** ~$5-10/month for private repositories
 
 ---
 
 ## Next Steps
 
-After completing Phase 6:
+After completing Phase 7:
 
-1. **Add More Accounts:** Use CI/CD to provision staging or shared-services accounts
-2. **Enhance Monitoring:** Add Slack/Discord notifications for failures and drift
-3. **Policy as Code:** Add OPA or Sentinel policies for governance
+1. **Monitor Deployments:** Watch first few automated deployments closely
+2. **Tune Notifications:** Add Slack/Discord webhooks for deployment status
+3. **Enhance Drift Detection:** Add remediation workflows for common drift scenarios
+4. **Scale Pattern:** Apply same CD approach to downstream Terraform projects
 
 ---
 
-**Previous Phase:** [Phase 5 - Migrate to Remote State](phase-5-migrate-to-remote-state.md)  
-**Next Phase (Optional):** [Phase 7 - Downstream CI/CD Integration](phase-7-downstream-cicd.md) - Set up OIDC for infrastructure projects
+**Previous Phase:** [Phase 6 - Migrate to Remote State](phase-6-migrate-to-remote-state.md)  
+**Next Phase:** [Phase 8 - Downstream CI/CD](phase-8-downstream-cicd.md)
+
+**Note:** Continuous Deployment is optional. Manual deployments are perfectly acceptable for bootstrap infrastructure.
 
 ---
 
@@ -1114,26 +968,23 @@ After completing Phase 6:
 
 **What You Accomplished:**
 
-- ✅ Automated code quality and security validation
-- ✅ Eliminated manual Terraform execution (if using Stage 2)
-- ✅ Implemented drift detection for compliance
-- ✅ Created audit trail for all infrastructure changes
-- ✅ Established foundation for scaling to more AWS accounts
+- ✅ Set up OIDC authentication for GitHub Actions
+- ✅ Automated Terraform deployments with approval gates
+- ✅ Implemented drift detection with automated alerts
+- ✅ Eliminated manual deployment steps
+- ✅ Established secure, auditable deployment pipeline
 
 **Files Created:**
 
 ```
-.github/
-└── workflows/
-    ├── validate.yml           # Linting, validation, security
-    ├── deploy.yml            # Automated deployment (Stage 2)
-    ├── drift-detection.yml   # Daily drift checks (Stage 2)
-    └── infracost.yml         # Cost estimation (optional)
-
 modules/terraform-state-backend/
-└── oidc.tf                   # OIDC provider and IAM role (Stage 2)
+└── oidc.tf                   # OIDC provider and IAM role
+
+.github/workflows/
+├── deploy.yml                # Automated deployment
+└── drift-detection.yml       # Daily drift checks
 ```
 
-**Time Invested:** 45-60 minutes  
-**Time Saved:** ~15 minutes per future bootstrap change  
-**Risk Reduced:** Drift detection prevents 100% of untracked manual changes
+**Time Invested:** 60-90 minutes  
+**Time Saved:** ~10 minutes per future bootstrap change  
+**Risk Reduced:** 100% automation eliminates manual deployment errors

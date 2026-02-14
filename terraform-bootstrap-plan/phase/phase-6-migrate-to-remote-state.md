@@ -1,10 +1,52 @@
-# Terraform Bootstrap - Phase 5: Migrate to Remote State (Optional)
+# Terraform Bootstrap - Phase 6: Migrate to Remote State (Optional)
+
+## Prerequisites
+
+**Required Access:**
+
+- AWS account access (same permissions as bootstrap deployment)
+- Write access to bootstrap repository
+- Access to S3 buckets created in previous phases
+
+**Required Tools:**
+
+- Terraform >= 1.7.0 installed locally
+- AWS CLI v2 configured
+- Git CLI
+- Text editor
+
+**Required Credentials:**
+
+- AWS SSO profile for the account being migrated
+- Verified AWS credentials with `aws sts get-caller-identity`
+
+**Required Files:**
+
+- Local `terraform.tfstate` file must exist (from Phase 3 or 5)
+- Backup of state file recommended (`terraform.tfstate.backup`)
+
+**Previous Phases:**
+
+- [Phase 3 - Bootstrap Dev](phase-3-bootstrap-dev.md) **required** (to migrate dev account)
+- [Phase 5 - Bootstrap Prod](phase-5-bootstrap-prod.md) **optional** (only needed if migrating prod account)
+
+**Note:** You can migrate dev to remote state before creating prod. Each account is independent.
+
+**⚠️ Critical:** Backup your local state files before migrating!
+
+---
 
 ## Overview
 
-**Bootstrap is complete for all accounts**, but the bootstrap Terraform state itself is still stored locally. This optional phase migrates the bootstrap state to S3 for team collaboration and disaster recovery.
+**Purpose:** Migrate the bootstrap project's Terraform state from local storage to S3 for team collaboration and disaster recovery.
 
 **Duration:** 15-30 minutes (per account)
+
+**Flexible Approach:** You can migrate each account independently:
+
+- Migrate dev before prod (recommended - test on dev first)
+- Migrate both accounts at once (if both exist)
+- Migrate only dev and skip prod migration (if prod doesn't exist yet)
 
 **Who Should Complete This:** Platform engineers familiar with Terraform state migration
 
@@ -19,12 +61,13 @@
 - Multiple engineers need to manage state infrastructure
 - You want centralized state for disaster recovery
 - Compliance requires all state in S3
+- **Before Phase 7 (Continuous Deployment)** - CD requires remote state
 
 ---
 
-## Feature 5: Migrate Bootstrap to Remote State
+## Feature 6: Migrate Bootstrap to Remote State
 
-### Story 5.1: Migrate Bootstrap State to S3
+### Story 6.1: Migrate Bootstrap State to S3
 
 - **Title:** Move Bootstrap State from Local to Remote Backend
 - **Persona:** As a **Platform Engineer**, I want to migrate the bootstrap project itself to use remote state so that the team can collaborate on state infrastructure changes.
@@ -157,7 +200,7 @@
 
 ---
 
-### Story 5.2: Repeat Migration for Dev and Prod (Optional)
+### Story 6.2: Repeat Migration for Dev and Prod (Optional)
 
 - **Title:** Migrate Dev and Prod Bootstrap State to S3
 - **Persona:** As a **Platform Engineer**, I want to ensure all bootstrap state is centralized so that the team can manage infrastructure consistently across all accounts.
@@ -271,7 +314,7 @@
 
 ---
 
-### Story 5.3: Commit Backend Configuration Changes
+### Story 6.3: Commit Backend Configuration Changes
 
 - **Title:** Update Git Repository with Remote Backend Configuration
 - **Persona:** As a **Platform Engineer**, I need to commit the backend configuration changes so that the team uses remote state when working on bootstrap infrastructure.
@@ -289,7 +332,6 @@
   cd mycompany.infra-terraform-bootstrap
 
   git status
-  # Should show modified: accounts/poc/providers.tf
   # Should show modified: accounts/dev/providers.tf
   # Should show modified: accounts/prod/providers.tf
   ```
@@ -337,7 +379,7 @@
 
 ---
 
-## Phase 5 Checklist
+## Phase 6 Checklist
 
 Complete this checklist to finish bootstrap migration:
 
@@ -486,7 +528,7 @@ Now that bootstrap state is remote:
 
 ---
 
-**Previous Phase:** [Phase 4 - Bootstrap Prod Account](phase-4-bootstrap-prod.md)  
-**Next Phase (Optional):** [Phase 6 - Bootstrap CI/CD](phase-6-bootstrap-cicd.md) - Automate validation and deployment
+**Previous Phase:** [Phase 5 - Bootstrap Prod Account](phase-5-bootstrap-prod.md)  
+**Next Phase (Optional):** [Phase 7 - Downstream CI/CD Integration](phase-7-downstream-cicd.md) - Set up OIDC for infrastructure projects
 
 **Estimated Time:** 15-30 minutes per account (45-90 minutes total)
