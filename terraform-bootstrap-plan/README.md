@@ -96,9 +96,42 @@ s3://mycompany-terraform-state-{account}/
 
 ## Multi-Account Structure
 
-| Account          | Purpose              | State Bucket Name                |
-| ---------------- | -------------------- | -------------------------------- |
-| `mycompany-dev`  | Active development   | `mycompany-terraform-state-dev`  |
+| Account | Purpose              | State Bucket Name                |
+| ------- | -------------------- | -------------------------------- |
+| Dev     | Development/Testing  | `mycompany-terraform-state-dev`  |
+| Prod    | Production/Workloads | `mycompany-terraform-state-prod` |
+
+---
+
+## Quick Execution Guide
+
+Once the repository is set up and the modules are created, follow these high-level steps to bootstrap an account (refer to Phase 3/4 for details):
+
+### 1. Configure the Account
+
+```bash
+cd accounts/dev # or prod
+cp terraform.tfvars.example terraform.tfvars
+# Update terraform.tfvars with the correct AWS Account ID
+```
+
+### 2. Deploy Local State
+
+```bash
+terraform init
+terraform plan
+terraform apply
+```
+
+### 3. Use the Output
+
+Copy the `backend_configuration` output and use it in your infrastructure repositories (e.g., `mycompany.infra-network`).
+
+---
+
+## Roadmap
+
+| `mycompany-dev` | Active development | `mycompany-terraform-state-dev` |
 | `mycompany-prod` | Production workloads | `mycompany-terraform-state-prod` |
 
 ### Architecture Diagram

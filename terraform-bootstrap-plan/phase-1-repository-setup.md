@@ -130,7 +130,7 @@
 
   #### 2) Create Root `README.md`
 
-  ```bash
+  ````bash
   cat > README.md << 'EOF'
   # Terraform Bootstrap
 
@@ -146,80 +146,12 @@
 
   ## Repository Structure
 
-  ```
-
   mycompany.infra-terraform-bootstrap/
   ├── modules/terraform-state-backend/ # Reusable module
   └── accounts/ # Account-specific configs
-  ├── poc/
   ├── dev/
   └── prod/
-
-  ````
-
-  ## Quick Start
-
-  ### 2. Bootstrap Dev Account
-
-  ```bash
-  cd accounts/dev
-  cp terraform.tfvars.example terraform.tfvars
-  vim terraform.tfvars  # Set aws_account_id
-
-  terraform init
-  terraform plan
-  terraform apply
-  ````
-
-  ### 2. Copy Backend Config
-
-  ```bash
-  terraform output backend_configuration
-  # Copy output to downstream projects
   ```
-
-  ### 3. Repeat for Dev and Prod
-
-  ```bash
-  cd ../dev
-  # Same steps...
-  ```
-
-  ## Outputs
-
-  Each account outputs backend configuration for use in other repositories:
-
-  ```hcl
-  terraform {
-    backend "s3" {
-      bucket         = "mycompany-terraform-state-dev"
-      key            = "{region}/{layer}/terraform.tfstate"
-      region         = "us-east-1"
-      encrypt        = true
-      dynamodb_table = "mycompany-terraform-locks"
-    }
-  }
-  ```
-
-  ## Documentation
-  - [Phase 0: Prerequisites](phase-0-prerequisites.md)
-  - [Phase 1: Repository Setup](phase-1-repository-setup.md)
-  - [Phase 2: Create Terraform Module](phase-2-terraform-module.md)
-  - [Phase 3: Bootstrap Dev Account](phase-3-bootstrap-dev.md)
-  - [Phase 4: Bootstrap Prod Account](phase-4-bootstrap-prod.md)
-  - [Phase 5: Migrate to Remote State](phase-5-migrate-to-remote-state.md)
-  - [Phase 6: Bootstrap CI/CD](phase-6-bootstrap-cicd.md)
-  - [Phase 7: Downstream CI/CD Integration](phase-7-downstream-cicd.md)
-
-  ## Cost
-  - S3: ~$0.023/GB + $0.005/1000 requests (< $1/month)
-  - DynamoDB: $0.25/month (on-demand, ~100 locks/month)
-  - **Total: < $2/month per account**
-
-  ## Prerequisites
-  - AWS CLI v2 with SSO configured
-  - Terraform >= 1.7.0
-  - Admin access to target AWS account
 
   #### 3) Commit Files
 
@@ -227,7 +159,7 @@
   git add .
   git commit -m "Add Terraform state backend module and documentation"
   git push -u origin main
-  ```
+  ````
 
 - **Acceptance Criteria:**
   - ✅ `.gitignore` excludes `*.tfstate`, `*.tfvars`, `.terraform/`
