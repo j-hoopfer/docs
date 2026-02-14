@@ -576,7 +576,7 @@ aws sts get-caller-identity --profile mycompany-dev
 
 ```bash
 # Test each profile
-for profile in mycompany-dev scale-dev scale-prod; do
+for profile in mycompany-dev mycompany-prod; do
   echo "Testing $profile..."
   aws sts get-caller-identity --profile $profile --query 'Account' --output text
 done
