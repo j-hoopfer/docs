@@ -69,8 +69,8 @@ The IAM policy created here is extremely specific and follows the principle of l
         "s3:DeleteObject"
       ],
       "Resource": [
-        "arn:aws:s3:::scale-solutions-terraform-state-dev",
-        "arn:aws:s3:::scale-solutions-terraform-state-dev/*"
+        "arn:aws:s3:::mycompany-terraform-state-dev",
+        "arn:aws:s3:::mycompany-terraform-state-dev/*"
       ]
     },
     {
