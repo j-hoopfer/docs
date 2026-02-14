@@ -130,7 +130,7 @@
 
   #### 2) Create Root `README.md`
 
-  ````bash
+  ```bash
   cat > README.md << 'EOF'
   # Terraform Bootstrap
 
@@ -151,6 +151,7 @@
   └── accounts/ # Account-specific configs
   ├── dev/
   └── prod/
+  EOF
   ```
 
   #### 3) Commit Files
@@ -159,7 +160,7 @@
   git add .
   git commit -m "Add Terraform state backend module and documentation"
   git push -u origin main
-  ````
+  ```
 
 - **Acceptance Criteria:**
   - ✅ `.gitignore` excludes `*.tfstate`, `*.tfvars`, `.terraform/`
