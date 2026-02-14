@@ -15,3 +15,11 @@ callouts
 - why am i deleting Default VPC? does this assume this is a new aws account? 
 - for any installations on mac, aws, terrform, etc, need to give both the brew and native install
 - should the permission structure be least privledge? right now everyone is being assigned admin
+
+
+need to update documentation around sso setup
+when you're redirected to login, after logging in successfully it asks you a couple more questions one of which sets the AWS_PROFILE which are added to the configs
+
+add a section about creaating a readme
+update the section about repo naming to incorporate the additional context
+ 

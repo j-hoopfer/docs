@@ -525,7 +525,7 @@
   tfenv use 1.7.0
 
   # Verify
-  terraform version
+  terraform --version
   # Expected: Terraform v1.7.0
   ```
 
