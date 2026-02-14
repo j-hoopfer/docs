@@ -1,6 +1,6 @@
 # Terraform Bootstrap Plan
 
-**Purpose:** Initialize Terraform state management infrastructure across AWS accounts and regions for Scale's cloud infrastructure.
+**Purpose:** Initialize Terraform state management infrastructure across AWS accounts and regions for mycompany's cloud infrastructure.
 
 **Repository:** `mycompany.infra-terraform-bootstrap`
 
@@ -16,7 +16,7 @@
 - Phase 3: Bootstrap Dev Account (30-60 minutes)
 - Phase 4: Bootstrap Prod Account (30-60 minutes)
 - Phase 5: Migrate to Remote State - **Optional** (15-30 minutes per account)
-- Phase 6: CI/CD Integration - **Optional** (varies)
+- Phase 6: Bootstrap CI/CD - **Optional** (45-60 minutes)
 
 ---
 
@@ -96,10 +96,10 @@ s3://mycompany-terraform-state-{account}/
 
 ## Multi-Account Structure
 
-| Account      | Purpose              | State Bucket Name            |
-| ------------ | -------------------- | ---------------------------- |
-| `scale-dev`  | Active development   | `{company}-terraform-state-dev`  |
-| `scale-prod` | Production workloads | `{company}-terraform-state-prod` |
+| Account          | Purpose              | State Bucket Name                |
+| ---------------- | -------------------- | -------------------------------- |
+| `mycompany-dev`  | Active development   | `mycompany-terraform-state-dev`  |
+| `mycompany-prod` | Production workloads | `mycompany-terraform-state-prod` |
 
 ### Architecture Diagram
 
@@ -112,9 +112,9 @@ s3://mycompany-terraform-state-{account}/
 │  │      (111111111111)            │  │     (222222222222)           │  │
 │  │                                │  │                              │  │
 │  │  ┌──────────────────────────┐  │  │  ┌────────────────────────┐  │  │
-│  │  │ S3: scale-terraform-     │  │  │  │ S3: scale-terraform-   │  │  │
-│  │  │     state-dev            │  │  │  │     state-prod         │  │  │
-│  │  │                          │  │  │  │                        │  │  │
+│  │  │ S3: mycompany-terraform- │  │  │  │ S3: mycompany-         │  │  │
+│  │  │     state-dev            │  │  │  │     terraform-state-   │  │  │
+│  │  │                          │  │  │  │     prod               │  │  │
 │  │  │ ├─ us-east-1/            │  │  │  │ ├─ us-east-1/          │  │  │
 │  │  │ │  ├─ 00-network/        │  │  │  │ │  ├─ 00-network/      │  │  │
 │  │  │ │  └─ 10-application/    │  │  │  │ │  └─ 10-application/  │  │  │
@@ -127,9 +127,9 @@ s3://mycompany-terraform-state-{account}/
 │  │                                │  │  └────────────────────────┘  │  │
 │  │  ┌──────────────────────────┐  │  │                              │  │
 │  │  │ DynamoDB:                │  │  │  ┌────────────────────────┐  │  │
-│  │  │ {company}-terraform-locks    │  │  │  │ DynamoDB:              │  │  │
-│  │  │                          │  │  │  │ {company}-terraform-locks  │  │  │
-│  │  │ Partition Key: LockID    │  │  │  │                        │  │  │
+│  │  │ mycompany-terraform-locks│  │  │  │ DynamoDB:              │  │  │
+│  │  │                          │  │  │  │ mycompany-terraform    │  │  │
+│  │  │ Partition Key: LockID    │  │  │  │ -locks                 │  │  │
 │  │  │ Billing: On-Demand       │  │  │  │ Partition Key: LockID  │  │  │
 │  │  └──────────────────────────┘  │  │  │ Billing: On-Demand     │  │  │
 │  │                                │  │  └────────────────────────┘  │  │
@@ -187,7 +187,7 @@ mycompany.infra-terraform-bootstrap/
 **Step 3.1: Clone Repository**
 
 ```bash
-git clone git@github.com:scale/mycompany.infra-terraform-bootstrap.git
+git clone git@github.com:mycompany/mycompany.infra-terraform-bootstrap.git
 cd mycompany.infra-terraform-bootstrap/accounts/dev
 ```
 
@@ -312,7 +312,9 @@ Attach this policy to your IAM Identity Center permission sets or IAM groups:
 }
 ```
 
-**For CI/CD Pipeline Access:** See [phase-6-cicd-integration.md](phase-6-cicd-integration.md) for GitHub Actions, GitLab CI, and Jenkins setup.
+**For Bootstrap CI/CD:** See [phase-6-bootstrap-cicd.md](phase-6-bootstrap-cicd.md) for automated validation and deployment of the bootstrap project itself.
+
+**For Downstream Project CI/CD:** See [phase-7-downstream-cicd.md](phase-7-downstream-cicd.md) for GitHub Actions, GitLab CI, and Jenkins setup in infrastructure projects that use this bootstrap.
 
 ### Read-Only Access Policy (For Auditors)
 
@@ -540,7 +542,8 @@ After bootstrap:
 - **[phase-3-bootstrap-dev.md](phase-3-bootstrap-dev.md)** - Dev account bootstrap
 - **[phase-4-bootstrap-prod.md](phase-4-bootstrap-prod.md)** - Prod account bootstrap
 - **[phase-5-migrate-to-remote-state.md](phase-5-migrate-to-remote-state.md)** - Optional state migration
-- **[phase-6-cicd-integration.md](phase-6-cicd-integration.md)** - GitHub Actions, GitLab CI, Jenkins integration
+- **[phase-6-bootstrap-cicd.md](phase-6-bootstrap-cicd.md)** - CI/CD for the bootstrap project itself
+- **[phase-7-downstream-cicd.md](phase-7-downstream-cicd.md)** - CI/CD integration for infrastructure projects using this bootstrap
 - **[appendix.md](appendix.md)** - Naming conventions, regional considerations, state security, local vs remote state comparison, migration paths
 
 ---

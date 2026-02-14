@@ -1,6 +1,6 @@
-# Phase 6: CI/CD Integration
+# Phase 7: Downstream CI/CD Integration
 
-**Purpose:** Configure IAM roles and permissions to allow CI/CD pipelines (GitHub Actions, GitLab CI, Jenkins, etc.) to run Terraform using the bootstrap state infrastructure.
+**Purpose:** Configure IAM roles and permissions to allow CI/CD pipelines (GitHub Actions, GitLab CI, Jenkins, etc.) in OTHER infrastructure projects to use the bootstrap state infrastructure.
 
 **Estimated Time:** 30-60 minutes per account
 
@@ -36,7 +36,7 @@ After bootstrapping your Terraform state infrastructure, you need to grant your 
 
 - OIDC provider created in AWS IAM
 - Thumbprint configured correctly
-- Provider limited to scale GitHub organization
+- Provider limited to mycompany GitHub organization
 
 #### Implementation
 
@@ -125,8 +125,8 @@ resource "aws_iam_role" "github_actions_terraform" {
           StringLike = {
             # Restrict to specific repos or organization
             "token.actions.githubusercontent.com:sub" = [
-              "repo:scale/{company}-cloud-infrastructure:*",
-              "repo:scale/scale-application:*"
+              "repo:mycompany/mycompany-cloud-infrastructure:*",
+              "repo:mycompany/mycompany-application:*"
             ]
           }
         }
@@ -721,7 +721,7 @@ resource "aws_cloudtrail" "state_bucket_audit" {
 
 ## Success Criteria
 
-After completing Phase 6:
+After completing Phase 7:
 
 - [ ] OIDC provider created for CI/CD platform
 - [ ] IAM role created with state access permissions

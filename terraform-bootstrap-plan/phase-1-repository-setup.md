@@ -208,6 +208,8 @@
   - [Phase 3: Bootstrap Dev Account](phase-3-bootstrap-dev.md)
   - [Phase 4: Bootstrap Prod Account](phase-4-bootstrap-prod.md)
   - [Phase 5: Migrate to Remote State](phase-5-migrate-to-remote-state.md)
+  - [Phase 6: Bootstrap CI/CD](phase-6-bootstrap-cicd.md)
+  - [Phase 7: Downstream CI/CD Integration](phase-7-downstream-cicd.md)
 
   ## Cost
   - S3: ~$0.023/GB + $0.005/1000 requests (< $1/month)

@@ -146,7 +146,8 @@ Acceptance Criteria:
 | Phase 3: Bootstrap Dev     | 30-60 min      | ✅ Accurate       |
 | Phase 4: Bootstrap Prod    | 30-60 min      | ✅ Accurate       |
 | Phase 5: Migrate to Remote | 15-30 min      | ✅ Accurate       |
-| Phase 6: CI/CD Integration | 30-60 min      | ✅ Accurate       |
+| Phase 6: Bootstrap CI/CD   | 45-60 min      | ✅ Accurate       |
+| Phase 7: Downstream CI/CD  | 30-60 min      | ✅ Accurate       |
 
 **Total**: 2-4 hours (matches real-world execution)
 
@@ -479,9 +480,34 @@ aws s3 ls s3://mycompany-terraform-state-dev/bootstrap/
 
 ---
 
-### **Phase 6: CI/CD Integration**
+### **Phase 6: Bootstrap CI/CD**
+
+**Coverage**: ⭐⭐⭐⭐⭐ (5/5)
+
+Covers automated validation and deployment for the bootstrap project itself.
+
+**What's Provided**:
+
+- **Stage 1 (Validation)**: Formatting checks, Terraform validation, security scanning (Checkov, tfsec)
+- **Stage 2 (Deployment)**: Automated terraform apply via OIDC, drift detection
+- Complete workflow YAML files for validation, deployment, and drift detection
+- GitHub Environments setup for prod approval gates
+- Security best practices and cost estimates
+
+**Why This is Excellent**:
+
+- Works with both local and remote state strategies
+- Includes daily drift detection with GitHub issue creation
+- Comprehensive security scanning with multiple tools
+- All workflows are production-ready, not just examples
+
+---
+
+### **Phase 7: Downstream CI/CD Integration**
 
 **Coverage**: ⭐⭐⭐⭐ (4/5)
+
+Covers setting up OIDC and IAM roles for OTHER infrastructure projects to use the bootstrap.
 
 **What's Provided**:
 
@@ -516,7 +542,7 @@ assume_role_policy = jsonencode({
         StringLike = {
           "token.actions.githubusercontent.com:sub" = [
             "repo:mycompany/mycompany-cloud-infrastructure:*",
-            "repo:mycompany/scale-application:*"
+            "repo:mycompany/mycompany-application:*"
           ]
         }
       }

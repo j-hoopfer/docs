@@ -205,7 +205,7 @@
   **Migrate:**
 
   ```bash
-  export AWS_PROFILE=scale-dev
+  export AWS_PROFILE=mycompany-dev
   terraform init -migrate-state
   # Type "yes" when prompted
 
@@ -252,7 +252,7 @@
   **Migrate:**
 
   ```bash
-  export AWS_PROFILE=scale-prod
+  export AWS_PROFILE=mycompany-prod
   terraform init -migrate-state
   # Type "yes" when prompted
 
@@ -487,6 +487,6 @@ Now that bootstrap state is remote:
 ---
 
 **Previous Phase:** [Phase 4 - Bootstrap Prod Account](phase-4-bootstrap-prod.md)  
-**Next Steps:** Document backend configs and integrate with infrastructure projects
+**Next Phase (Optional):** [Phase 6 - Bootstrap CI/CD](phase-6-bootstrap-cicd.md) - Automate validation and deployment
 
 **Estimated Time:** 15-30 minutes per account (45-90 minutes total)

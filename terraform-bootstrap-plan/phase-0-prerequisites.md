@@ -432,7 +432,7 @@ AWS SSO allows you to authenticate once and access multiple AWS accounts without
 
 Before continuing, you need:
 
-- Your **AWS SSO start URL** (e.g., `https://scale.awsapps.com/start`)
+- Your **AWS SSO start URL** (e.g., `https://mycompany.awsapps.com/start`)
 - Your **AWS region** where Identity Center is configured (e.g., `us-east-1`)
 - Access to the AWS accounts you'll be deploying to (POC, Dev, Prod)
 
@@ -452,7 +452,7 @@ aws configure sso
 **Answer the prompts:**
 
 ```
-SSO session name (Recommended): scale
+SSO session name (Recommended): mycompany
 SSO start URL [None]: https://d-xxxxx.awsapps.com/start
 SSO region [None]: us-east-1
 SSO registration scopes [None]: sso:account:access
@@ -551,7 +551,7 @@ aws sso login --profile mycompany-dev
 
 - Browser opens to AWS SSO login
 - You authenticate with your credentials
-- Terminal shows: `Successfully logged into Start URL: https://scale.awsapps.com/start`
+- Terminal shows: `Successfully logged into Start URL: https://mycompany.awsapps.com/start`
 
 **Note for Windows users:** If the browser doesn't open automatically, copy the URL from the terminal and paste it into your browser.
 
@@ -651,7 +651,7 @@ git config --global user.email
 
 ```bash
 git config --global user.name "Your Name"
-git config --global user.email "your.email@scale.com"
+git config --global user.email "your.email@mycompany.com"
 ```
 
 ### Configure SSH Keys for GitHub
@@ -664,7 +664,7 @@ ls -la ~/.ssh
 # Look for id_rsa.pub or id_ed25519.pub
 
 # If no keys exist, create one:
-ssh-keygen -t ed25519 -C "your.email@scale.com"
+ssh-keygen -t ed25519 -C "your.email@mycompany.com"
 # Press Enter to accept defaults
 
 # Add SSH key to ssh-agent
@@ -689,7 +689,7 @@ cat ~/.ssh/id_ed25519.pub
 ls ~\.ssh
 
 # If no keys exist, create one:
-ssh-keygen -t ed25519 -C "your.email@scale.com"
+ssh-keygen -t ed25519 -C "your.email@mycompany.com"
 # Press Enter to accept defaults
 
 # Start ssh-agent
@@ -802,8 +802,8 @@ aws s3 ls --profile mycompany-dev
 # Verify GitHub CLI authentication
 gh auth status
 
-# Verify you can access the Scale organization
-gh repo list scale
+# Verify you can access the mycompany organization
+gh repo list mycompany
 ```
 
 **Expected:** Successfully authenticated, can list repositories (or appropriate error if org doesn't exist yet).
@@ -898,7 +898,7 @@ aws sso login --profile mycompany-dev
 
 # Or extend session duration (if your org allows):
 # Edit ~/.aws/config (macOS/Linux) or %USERPROFILE%\.aws\config (Windows)
-# Add under [sso-session scale]:
+# Add under [sso-session mycompany]:
 # sso_max_session_duration = 28800  # 8 hours (default)
 ```
 
