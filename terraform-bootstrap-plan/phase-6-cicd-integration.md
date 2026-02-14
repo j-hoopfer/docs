@@ -1,4 +1,4 @@
-# Phase 5: CI/CD Integration
+# Phase 6: CI/CD Integration
 
 **Purpose:** Configure IAM roles and permissions to allow CI/CD pipelines (GitHub Actions, GitLab CI, Jenkins, etc.) to run Terraform using the bootstrap state infrastructure.
 
@@ -721,7 +721,7 @@ resource "aws_cloudtrail" "state_bucket_audit" {
 
 ## Success Criteria
 
-After completing Phase 5:
+After completing Phase 6:
 
 - [ ] OIDC provider created for CI/CD platform
 - [ ] IAM role created with state access permissions

@@ -202,10 +202,12 @@
   ```
 
   ## Documentation
-  - [Phase 0: Repository Setup](phase-0-repository-setup.md)
-  - [Phase 2: Bootstrap Dev Account](phase-2-bootstrap-dev.md)
-  - [Phase 3: Bootstrap Prod Account](phase-3-bootstrap-prod.md)
-  - [Phase 3: Migrate to Remote State](phase-3-migrate-to-remote-state.md)
+  - [Phase 0: Prerequisites](phase-0-prerequisites.md)
+  - [Phase 1: Repository Setup](phase-1-repository-setup.md)
+  - [Phase 2: Create Terraform Module](phase-2-terraform-module.md)
+  - [Phase 3: Bootstrap Dev Account](phase-3-bootstrap-dev.md)
+  - [Phase 4: Bootstrap Prod Account](phase-4-bootstrap-prod.md)
+  - [Phase 5: Migrate to Remote State](phase-5-migrate-to-remote-state.md)
 
   ## Cost
   - S3: ~$0.023/GB + $0.005/1000 requests (< $1/month)

@@ -1,4 +1,4 @@
-# Terraform Bootstrap - Phase 3: Migrate to Remote State (Optional)
+# Terraform Bootstrap - Phase 5: Migrate to Remote State (Optional)
 
 ## Overview
 
@@ -22,9 +22,9 @@
 
 ---
 
-## Feature 4: Migrate Bootstrap to Remote State
+## Feature 5: Migrate Bootstrap to Remote State
 
-### Story 4.1: Migrate Bootstrap State to S3
+### Story 5.1: Migrate Bootstrap State to S3
 
 - **Title:** Move Bootstrap State from Local to Remote Backend
 - **Persona:** As a **Platform Engineer**, I want to migrate the bootstrap project itself to use remote state so that the team can collaborate on state infrastructure changes.
@@ -157,7 +157,7 @@
 
 ---
 
-### Story 4.2: Repeat Migration for Dev and Prod (Optional)
+### Story 5.2: Repeat Migration for Dev and Prod (Optional)
 
 - **Title:** Migrate Dev and Prod Bootstrap State to S3
 - **Persona:** As a **Platform Engineer**, I want to ensure all bootstrap state is centralized so that the team can manage infrastructure consistently across all accounts.
@@ -271,7 +271,7 @@
 
 ---
 
-### Story 4.3: Commit Backend Configuration Changes
+### Story 5.3: Commit Backend Configuration Changes
 
 - **Title:** Update Git Repository with Remote Backend Configuration
 - **Persona:** As a **Platform Engineer**, I need to commit the backend configuration changes so that the team uses remote state when working on bootstrap infrastructure.
@@ -337,7 +337,7 @@
 
 ---
 
-## Phase 3 Checklist
+## Phase 5 Checklist
 
 Complete this checklist to finish bootstrap migration:
 
@@ -495,7 +495,7 @@ Now that bootstrap state is remote:
 
 ---
 
-**Previous Phase:** [Phase 3 - Bootstrap Additional Accounts](phase-2-bootstrap-additional-accounts.md)  
+**Previous Phase:** [Phase 4 - Bootstrap Prod Account](phase-4-bootstrap-prod.md)  
 **Next Steps:** Document backend configs and integrate with infrastructure projects
 
 **Estimated Time:** 15-30 minutes per account (45-90 minutes total)

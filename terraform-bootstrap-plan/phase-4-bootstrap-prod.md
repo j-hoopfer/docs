@@ -1,4 +1,4 @@
-# Terraform Bootstrap - Phase 3: Bootstrap Prod Account
+# Terraform Bootstrap - Phase 4: Bootstrap Prod Account
 
 ## Overview
 
@@ -10,9 +10,9 @@
 
 ---
 
-## Feature 3: Bootstrap Prod Account
+## Feature 4: Bootstrap Prod Account
 
-### Story 3.1: Bootstrap Prod Account
+### Story 4.1: Bootstrap Prod Account
 
 - **Title:** Deploy Terraform State Infrastructure in Prod Account
 - **Persona:** As a **Platform Engineer**, I need to create state infrastructure in the Prod account so that production workloads can be managed with Terraform under strict controls.
@@ -224,7 +224,7 @@ MFA delete requires root user credentials. This is a security feature. Options:
 
 ## Next Steps
 
-After completing Phase 3:
+After completing Phase 4:
 
 1. **Document Backend Configs:** Share `BACKEND_CONFIG_PROD.txt` file with infrastructure teams
 2. **Update CI/CD:** Attach IAM policies to CI/CD service accounts in Prod environment
@@ -233,7 +233,7 @@ After completing Phase 3:
 
 ---
 
-**Previous Phase:** [Phase 2 - Bootstrap Dev Account](phase-2-bootstrap-dev.md)  
-**Next Phase:** [Phase 4 - Migrate to Remote State (Optional)](phase-4-migrate-to-remote-state.md)
+**Previous Phase:** [Phase 3 - Bootstrap Dev Account](phase-3-bootstrap-dev.md)  
+**Next Phase:** [Phase 5 - Migrate to Remote State (Optional)](phase-5-migrate-to-remote-state.md)
 
 **Estimated Time:** 30-60 minutes

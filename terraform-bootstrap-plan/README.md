@@ -11,10 +11,12 @@
 **Estimated Time:** 2-4 hours total (all accounts)
 
 - Phase 0: Prerequisites (30-60 minutes)
-- Phase 1: Repository Setup (1-2 hours)
-- Phase 2: Bootstrap Dev Account (30-60 minutes)
-- Phase 3: Bootstrap Prod Account (30-60 minutes)
-- Phase 4: Migrate to Remote State - **Optional** (15-30 minutes per account)
+- Phase 1: Repository Setup (30-45 minutes)
+- Phase 2: Create Terraform Module (30-45 minutes)
+- Phase 3: Bootstrap Dev Account (30-60 minutes)
+- Phase 4: Bootstrap Prod Account (30-60 minutes)
+- Phase 5: Migrate to Remote State - **Optional** (15-30 minutes per account)
+- Phase 6: CI/CD Integration - **Optional** (varies)
 
 ---
 
@@ -180,16 +182,16 @@ scale.infra-terraform-bootstrap/
 
 ## Implementation Steps
 
-### Phase 2: Bootstrap Dev Account
+### Phase 3: Bootstrap Dev Account
 
-**Step 2.1: Clone Repository**
+**Step 3.1: Clone Repository**
 
 ```bash
 git clone git@github.com:scale/scale.infra-terraform-bootstrap.git
 cd scale.infra-terraform-bootstrap/accounts/dev
 ```
 
-**Step 2.2: Configure Variables**
+**Step 3.2: Configure Variables**
 
 ```hcl
 # accounts/dev/terraform.tfvars
@@ -198,7 +200,7 @@ environment    = "dev"
 primary_region = "us-east-1"
 ```
 
-**Step 2.3: Initialize with Local State**
+**Step 3.3: Initialize with Local State**
 
 ```bash
 terraform init  # No backend configured - uses local state
@@ -206,14 +208,14 @@ terraform plan
 terraform apply
 ```
 
-**Step 2.4: Verify Resources Created**
+**Step 3.4: Verify Resources Created**
 
 - S3 Bucket: `scale-terraform-state-dev`
 - DynamoDB Table: `scale-terraform-locks`
 - Bucket versioning enabled
 - Encryption enabled (SSE-S3)
 
-**Step 2.5: Commit Backend Config**
+**Step 3.5: Commit Backend Config**
 Output will provide backend configuration for downstream projects:
 
 ```hcl
@@ -229,7 +231,7 @@ terraform {
 }
 ```
 
-**Step 2.6: Migrate Bootstrap to Remote State** (Optional)
+**Step 3.6: Migrate Bootstrap to Remote State** (Optional)
 After verifying the bucket works with other projects, you can migrate the bootstrap itself to use remote state:
 
 ```bash
@@ -239,7 +241,7 @@ terraform init -migrate-state
 
 ---
 
-### Phase 3: Bootstrap Prod Account
+### Phase 4: Bootstrap Prod Account
 
 ```bash
 cd ../prod
@@ -310,7 +312,7 @@ Attach this policy to your IAM Identity Center permission sets or IAM groups:
 }
 ```
 
-**For CI/CD Pipeline Access:** See [phase-5-cicd-integration.md](phase-5-cicd-integration.md) for GitHub Actions, GitLab CI, and Jenkins setup.
+**For CI/CD Pipeline Access:** See [phase-6-cicd-integration.md](phase-6-cicd-integration.md) for GitHub Actions, GitLab CI, and Jenkins setup.
 
 ### Read-Only Access Policy (For Auditors)
 
@@ -533,11 +535,12 @@ After bootstrap:
 ## Additional Resources
 
 - **[phase-0-prerequisites.md](phase-0-prerequisites.md)** - Install Terraform, AWS CLI, configure AWS SSO (macOS/Windows/Linux)
-- **[phase-1-repository-setup.md](phase-1-repository-setup.md)** - Repository and module creation
-- **[phase-2-bootstrap-poc.md](phase-2-bootstrap-poc.md)** - Dev account bootstrap
-- **[phase-3-bootstrap-additional-accounts.md](phase-3-bootstrap-additional-accounts.md)** - Prod account bootstrap
-- **[phase-4-migrate-to-remote-state.md](phase-4-migrate-to-remote-state.md)** - Optional state migration
-- **[phase-5-cicd-integration.md](phase-5-cicd-integration.md)** - GitHub Actions, GitLab CI, Jenkins integration
+- **[phase-1-repository-setup.md](phase-1-repository-setup.md)** - Repository initialization and Git configuration
+- **[phase-2-terraform-module.md](phase-2-terraform-module.md)** - Terraform state backend module creation
+- **[phase-3-bootstrap-dev.md](phase-3-bootstrap-dev.md)** - Dev account bootstrap
+- **[phase-4-bootstrap-prod.md](phase-4-bootstrap-prod.md)** - Prod account bootstrap
+- **[phase-5-migrate-to-remote-state.md](phase-5-migrate-to-remote-state.md)** - Optional state migration
+- **[phase-6-cicd-integration.md](phase-6-cicd-integration.md)** - GitHub Actions, GitLab CI, Jenkins integration
 - **[appendix.md](appendix.md)** - Naming conventions, regional considerations, state security, local vs remote state comparison, migration paths
 
 ---

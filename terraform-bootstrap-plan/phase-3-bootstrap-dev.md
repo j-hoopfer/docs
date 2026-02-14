@@ -1,8 +1,8 @@
-# Terraform Bootstrap - Phase 2: Bootstrap Dev Account
+# Terraform Bootstrap - Phase 3: Bootstrap Dev Account
 
 ## Overview
 
-**Now that the repository structure exists**, deploy Terraform state infrastructure (S3 + DynamoDB) to the Dev AWS account. This phase creates the foundation for remote state management in your development environment.
+**Now that the repository structure and module exist**, deploy Terraform state infrastructure (S3 + DynamoDB) to the Dev AWS account. This phase creates the foundation for remote state management in your development environment.
 
 **Duration:** 30-60 minutes
 
@@ -10,9 +10,9 @@
 
 ---
 
-## Feature 2: Bootstrap Dev Account
+## Feature 3: Bootstrap Dev Account
 
-### Story 2.1: Create Dev Account Configuration Files
+### Story 3.1: Create Dev Account Configuration Files
 
 - **Title:** Configure Terraform for Dev Account Bootstrap
 - **Persona:** As a **Platform Engineer**, I need account-specific Terraform files for the Dev environment so that I can create state infrastructure in the Dev AWS account.
@@ -151,7 +151,7 @@
 
 ---
 
-### Story 2.2: Initialize and Apply Dev Bootstrap
+### Story 3.2: Initialize and Apply Dev Bootstrap
 
 - **Title:** Deploy Terraform State Infrastructure in Dev Account
 - **Persona:** As a **Platform Engineer**, I need to run Terraform to create the S3 bucket and DynamoDB table so that the Dev account has state infrastructure ready.
@@ -306,7 +306,7 @@
 
 ---
 
-### Story 2.3: Validate Backend with Test Project
+### Story 3.3: Validate Backend with Test Project
 
 - **Title:** Test Remote Backend with Sample Terraform Project
 - **Persona:** As a **Platform Engineer**, I need to verify the state backend works correctly so that I can confidently deploy real infrastructure using it.
@@ -465,7 +465,7 @@
 
 ## Phase 2 Checklist
 
-Complete this checklist before proceeding to Phase 3:
+Complete this checklist before proceeding to Phase 4:
 
 - [ ] `accounts/dev/` configuration files created
 - [ ] `terraform.tfvars` created with actual Dev account ID
@@ -479,7 +479,7 @@ Complete this checklist before proceeding to Phase 3:
 
 ---
 
-**Previous Phase:** [Phase 1 - Repository Setup](phase-1-repository-setup.md)  
-**Next Phase:** [Phase 3 - Bootstrap Prod Account](phase-3-bootstrap-additional-accounts.md)
+**Previous Phase:** [Phase 2 - Create Terraform Module](phase-2-terraform-module.md)  
+**Next Phase:** [Phase 4 - Bootstrap Prod Account](phase-4-bootstrap-prod.md)
 
 **Estimated Time:** 30-60 minutes
