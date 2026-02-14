@@ -26,7 +26,88 @@
 
 - **Implementation Details:**
 
-  #### 1) Create `modules/terraform-state-backend/main.tf`
+  #### 1) Create `modules/terraform-state-backend/variables.tf`
+
+  ```hcl
+  variable "bucket_name" {
+    description = "Name of the S3 bucket for Terraform state"
+    type        = string
+
+    validation {
+      condition     = can(regex("^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$", var.bucket_name))
+      error_message = "Bucket name must be lowercase, alphanumeric, and hyphens only (3-63 chars)."
+    }
+  }
+
+  variable "lock_table_name" {
+    description = "Name of the DynamoDB table for state locking"
+    type        = string
+    default     = "mycompany-terraform-locks"
+  }
+
+  variable "environment" {
+    description = "Environment name (dev, prod)"
+    type        = string
+
+    validation {
+      condition     = contains(["dev", "prod"], var.environment)
+      error_message = "Environment must be one of: dev, prod."
+    }
+  }
+
+  variable "common_tags" {
+    description = "Common tags to apply to all resources"
+    type        = map(string)
+    default     = {}
+  }
+  ```
+
+  #### 3) Create `modules/terraform-state-backend/outputs.tf`
+
+  ```hcl
+  output "state_bucket_name" {
+    description = "Name of the S3 bucket for Terraform state"
+    value       = aws_s3_bucket.terraform_state.bucket
+  }
+
+  output "state_bucket_arn" {
+    description = "ARN of the S3 bucket for Terraform state"
+    value       = aws_s3_bucket.terraform_state.arn
+  }
+
+  output "lock_table_name" {
+    description = "Name of the DynamoDB table for state locking"
+    value       = aws_dynamodb_table.terraform_locks.name
+  }
+
+  output "lock_table_arn" {
+    description = "ARN of the DynamoDB table for state locking"
+    value       = aws_dynamodb_table.terraform_locks.arn
+  }
+
+  output "iam_policy_arn" {
+    description = "ARN of the IAM policy for state access"
+    value       = aws_iam_policy.terraform_state_access.arn
+  }
+
+  output "backend_config" {
+    description = "Backend configuration for downstream projects"
+    value = {
+      bucket         = aws_s3_bucket.terraform_state.bucket
+      region         = aws_s3_bucket.terraform_state.region
+      dynamodb_table = aws_dynamodb_table.terraform_locks.name
+      encrypt        = true
+    }
+  }
+  ```
+
+  #### 3) Create `modules/terraform-state-backend/main.tf`
+
+  ```bash
+  touch modules/terraform-state-backend/variables.tf
+  touch modules/terraform-state-backend/outputs.tf
+  touch modules/terraform-state-backend/main.tf
+  ```
 
   ```hcl
   # S3 Bucket for Terraform State
@@ -146,123 +227,7 @@
   }
   ```
 
-  #### 2) Create `modules/terraform-state-backend/variables.tf`
-
-  ```hcl
-  variable "bucket_name" {
-    description = "Name of the S3 bucket for Terraform state"
-    type        = string
-
-    validation {
-      condition     = can(regex("^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$", var.bucket_name))
-      error_message = "Bucket name must be lowercase, alphanumeric, and hyphens only (3-63 chars)."
-    }
-  }
-
-  variable "lock_table_name" {
-    description = "Name of the DynamoDB table for state locking"
-    type        = string
-    default     = "mycompany-terraform-locks"
-  }
-
-  variable "environment" {
-    description = "Environment name (dev, prod)"
-    type        = string
-
-    validation {
-      condition     = contains(["dev", "prod"], var.environment)
-      error_message = "Environment must be one of: dev, prod."
-    }
-  }
-
-  variable "common_tags" {
-    description = "Common tags to apply to all resources"
-    type        = map(string)
-    default     = {}
-  }
-  ```
-
-  #### 3) Create `modules/terraform-state-backend/outputs.tf`
-
-  ```hcl
-  output "state_bucket_name" {
-    description = "Name of the S3 bucket for Terraform state"
-    value       = aws_s3_bucket.terraform_state.bucket
-  }
-
-  output "state_bucket_arn" {
-    description = "ARN of the S3 bucket for Terraform state"
-    value       = aws_s3_bucket.terraform_state.arn
-  }
-
-  output "lock_table_name" {
-    description = "Name of the DynamoDB table for state locking"
-    value       = aws_dynamodb_table.terraform_locks.name
-  }
-
-  output "lock_table_arn" {
-    description = "ARN of the DynamoDB table for state locking"
-    value       = aws_dynamodb_table.terraform_locks.arn
-  }
-
-  output "iam_policy_arn" {
-    description = "ARN of the IAM policy for state access"
-    value       = aws_iam_policy.terraform_state_access.arn
-  }
-
-  output "backend_config" {
-    description = "Backend configuration for downstream projects"
-    value = {
-      bucket         = aws_s3_bucket.terraform_state.bucket
-      region         = aws_s3_bucket.terraform_state.region
-      dynamodb_table = aws_dynamodb_table.terraform_locks.name
-      encrypt        = true
-    }
-  }
-  ```
-
-  #### 4) Create `modules/terraform-state-backend/README.md`
-
-  ```markdown
-  # Terraform State Backend Module
-
-  Creates S3 bucket and DynamoDB table for Terraform remote state storage.
-
-  ## Features
-
-  - S3 bucket with versioning enabled
-  - Server-side encryption (AES256 or KMS)
-  - Public access blocked
-  - Lifecycle policy (deletes old versions after 90 days)
-  - DynamoDB table for state locking (on-demand billing)
-  - IAM policy for CI/CD access
-
-  ## Usage
-
-  \`\`\`hcl
-  module "terraform_backend" {
-  source = "../../modules/terraform-state-backend"
-
-  bucket_name = "mycompany-terraform-state-dev"
-  lock_table_name = "mycompany-terraform-locks"
-  environment = "dev"
-
-  common_tags = {
-  ManagedBy = "Terraform"
-  Repository = "mycompany.infra-terraform-bootstrap"
-  }
-  }
-  \`\`\`
-
-  ## Outputs
-
-  - `state_bucket_name` - S3 bucket name
-  - `lock_table_name` - DynamoDB table name
-  - `iam_policy_arn` - IAM policy ARN for CI/CD
-  - `backend_config` - Complete backend configuration
-  ```
-
-  #### 5) Commit Module Files
+  #### 4) Commit Module Files
 
   ```bash
   git add modules/terraform-state-backend/
@@ -282,7 +247,7 @@
   - ✅ `modules/terraform-state-backend/main.tf` creates IAM policy
   - ✅ `variables.tf` includes validation for bucket name and environment
   - ✅ `outputs.tf` exports all necessary values
-  - ✅ `README.md` documents module usage
+  - ✅ Root `README.md` includes module documentation
   - ✅ Module files committed and pushed to GitHub
 
 ---
@@ -297,7 +262,7 @@ Complete this checklist before proceeding to Phase 3:
 - [ ] IAM policy resource grants S3 and DynamoDB access
 - [ ] `variables.tf` includes validation for bucket name and environment
 - [ ] `outputs.tf` exports bucket name, table name, policy ARN, and backend config
-- [ ] `README.md` documents module usage with example
+- [ ] Root `README.md` verified to include module documentation and example
 - [ ] All module files committed and pushed to GitHub
 
 **Estimated Time:** 30-45 minutes

@@ -98,69 +98,104 @@
 
   #### 1) Create `.gitignore`
 
-  ```bash
-  cat > .gitignore << 'EOF'
-  # Terraform State (Local)
-  *.tfstate
-  *.tfstate.*
-  *.tfstate.backup
+```bash
+cat > .gitignore << 'EOF'
+# Terraform State (Local)
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
 
-  # Terraform directories
-  .terraform/
-  .terraform.lock.hcl
+# Terraform directories
+.terraform/
+.terraform.lock.hcl
 
-  # Variable files (contain account IDs)
-  *.tfvars
-  !*.tfvars.example
+# Variable files (contain account IDs)
+*.tfvars
+!*.tfvars.example
 
-  # Logs
-  *.log
+# Logs
+*.log
 
-  # macOS
-  .DS_Store
+# macOS
+.DS_Store
 
-  # Editors
-  .vscode/
-  .idea/
-  *.swp
-  *.swo
-  *~
-  EOF
-  ```
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+EOF
+```
 
-  #### 2) Create Root `README.md`
+#### 2) Create Root `README.md`
 
-  ```bash
-  cat > README.md << 'EOF'
-  # Terraform Bootstrap
+```bash
+cat > README.md << 'EOF'
+# Terraform Bootstrap
 
-  **Purpose:** One-time setup to create Terraform state infrastructure (S3 + DynamoDB) for Dev and Prod AWS accounts.
+**Purpose:** One-time setup to create Terraform state infrastructure (S3 + DynamoDB) for Dev and Prod AWS accounts.
 
-  ## Overview
+## Overview
 
-  This repository solves the "chicken and egg" problem:
-  - **Problem:** You need an S3 bucket to store Terraform state
-  - **Solution:** Run this bootstrap project with local state once per account
+This repository solves the "chicken and egg" problem:
+- **Problem:** You need an S3 bucket to store Terraform state
+- **Solution:** Run this bootstrap project with local state once per account
 
-  After bootstrap, all other infrastructure projects use the remote S3 backend.
+After bootstrap, all other infrastructure projects use the remote S3 backend.
 
-  ## Repository Structure
+## Repository Structure
 
-  mycompany.infra-terraform-bootstrap/
-  ├── modules/terraform-state-backend/ # Reusable module
-  └── accounts/ # Account-specific configs
-  ├── dev/
-  └── prod/
-  EOF
-  ```
+mycompany.infra-terraform-bootstrap/
+├── modules/terraform-state-backend/ # Reusable module
+└── accounts/ # Account-specific configs
+    ├── dev/
+    └── prod/
 
-  #### 3) Commit Files
+## Modules
 
-  ```bash
-  git add .
-  git commit -m "Add Terraform state backend module and documentation"
-  git push -u origin main
-  ```
+### Terraform State Backend (`modules/terraform-state-backend`)
+
+Creates S3 bucket and DynamoDB table for Terraform remote state storage.
+
+#### Features
+- S3 bucket with versioning enabled
+- Server-side encryption (AES256 or KMS)
+- Public access blocked
+- Lifecycle policy (deletes old versions after 90 days)
+- DynamoDB table for state locking (on-demand billing)
+- IAM policy for CI/CD access
+
+#### Usage Example
+module "terraform_backend" {
+  source = "../../modules/terraform-state-backend"
+
+  bucket_name     = "mycompany-terraform-state-dev"
+  lock_table_name = "mycompany-terraform-locks"
+  environment     = "dev"
+
+  common_tags = {
+    ManagedBy  = "Terraform"
+    Repository = "mycompany.infra-terraform-bootstrap"
+  }
+}
+
+#### Outputs
+
+- `state_bucket_name` - S3 bucket name
+- `lock_table_name` - DynamoDB table name
+- `iam_policy_arn` - IAM policy ARN for CI/CD
+- `backend_config` - Complete backend configuration
+EOF
+```
+
+#### 3) Commit Files
+
+```bash
+git add .
+git commit -m "Add Terraform state backend module and documentation"
+git push -u origin main
+```
 
 - **Acceptance Criteria:**
   - ✅ `.gitignore` excludes `*.tfstate`, `*.tfvars`, `.terraform/`
