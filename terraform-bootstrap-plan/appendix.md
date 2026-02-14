@@ -702,3 +702,280 @@ You can change strategies later if needs evolve:
 - Security team mandates centralized state governance
 
 ---
+
+## Appendix G: AWS CLI Authentication Issues
+
+### Common Error: InvalidToken / InvalidClientTokenId
+
+**Error Messages:**
+
+```
+An error occurred (InvalidToken) when calling the ListBuckets operation:
+The provided token is malformed or otherwise invalid.
+
+An error occurred (InvalidClientTokenId) when calling the GetCallerIdentity operation:
+The security token included in the request is invalid
+```
+
+### Root Cause
+
+This error typically occurs when you have **expired credentials** in your `~/.aws/credentials` file, even if you've recently run `aws sso login`.
+
+**What happens:**
+
+1. You run `aws sso login --profile scale-dev` → ✅ Caches valid SSO credentials for `scale-dev` profile
+2. You run `aws s3 ls` (without specifying profile) → ❌ Uses `[default]` profile with expired credentials
+3. Result: InvalidToken error
+
+### Why SSO Login Doesn't Fix Default Profile
+
+AWS SSO login **does NOT** update the `[default]` profile in your `~/.aws/credentials` file. It stores credentials separately for named SSO profiles.
+
+**Example of the problem:**
+
+```ini
+# ~/.aws/credentials
+[default]
+aws_access_key_id=ASIA6GBMCTXL6BCHIN6N
+aws_secret_access_key=acgJh+O3KZXMyXlxiZjtw5/vS1teEy1C/k9KZvI4
+aws_session_token=IQoJb3JpZ2luX2VjEG... (EXPIRED - causes the error!)
+
+# ~/.aws/config
+[profile scale-dev]
+sso_session = scale
+sso_account_id = 975050022359
+sso_role_name = AWSAdministratorAccess
+region = us-east-1
+```
+
+Even after running `aws sso login --profile scale-dev`, the `[default]` profile still has expired credentials.
+
+### Diagnosis Steps
+
+**1. Check your AWS credentials:**
+
+```bash
+cat ~/.aws/credentials
+```
+
+Look for temporary credentials in the `[default]` profile:
+
+- Keys starting with `ASIA` (temporary) vs `AKIA` (permanent)
+- `aws_session_token` field (indicates temporary credentials)
+
+**2. Check your AWS identity:**
+
+```bash
+aws sts get-caller-identity
+# If this fails, your default credentials are invalid
+
+aws sts get-caller-identity --profile scale-dev
+# If this works, your SSO profile is valid
+```
+
+**3. Check environment variables:**
+
+```bash
+env | grep -E '^AWS_' | sort
+```
+
+If `AWS_ACCESS_KEY_ID` or `AWS_SESSION_TOKEN` are set, they override your credentials file.
+
+### Solution Options
+
+#### Option 1: Use SSO Profile (Recommended)
+
+**Set profile in your terminal session:**
+
+```bash
+export AWS_PROFILE=scale-dev
+aws s3 ls  # Now works!
+```
+
+**Or specify profile on each command:**
+
+```bash
+aws s3 ls --profile scale-dev
+aws sts get-caller-identity --profile scale-dev
+```
+
+**Make permanent (add to `~/.zshrc` or `~/.bashrc`):**
+
+```bash
+echo 'export AWS_PROFILE=scale-dev' >> ~/.zshrc
+source ~/.zshrc
+```
+
+#### Option 2: Remove Expired Default Credentials
+
+**Edit `~/.aws/credentials`:**
+
+```bash
+nano ~/.aws/credentials
+# or
+code ~/.aws/credentials
+```
+
+**Remove the `[default]` section entirely:**
+
+```ini
+# Before:
+[default]
+aws_access_key_id=ASIA6GBMCTXL6BCHIN6N
+aws_secret_access_key=acgJh+O3KZXMyXlxiZjtw5/vS1teEy1C/k9KZvI4
+aws_session_token=IQoJb3JpZ2luX2VjEG...
+
+# After: (delete the entire [default] section)
+```
+
+**Then use profiles explicitly:**
+
+```bash
+aws s3 ls --profile scale-dev
+```
+
+#### Option 3: Clear Environment Variables
+
+If environment variables are set, they override everything:
+
+```bash
+unset AWS_ACCESS_KEY_ID
+unset AWS_SECRET_ACCESS_KEY
+unset AWS_SESSION_TOKEN
+unset AWS_SECURITY_TOKEN
+```
+
+### SSO Login Workflow
+
+**Correct workflow when using AWS SSO:**
+
+```bash
+# 1. Login to SSO profile
+aws sso login --profile scale-dev
+
+# 2. Either set profile as default:
+export AWS_PROFILE=scale-dev
+
+# Or specify profile on every command:
+aws s3 ls --profile scale-dev
+aws dynamodb list-tables --profile scale-dev
+terraform init  # Reads AWS_PROFILE automatically
+```
+
+### Terraform Configuration
+
+When using SSO profiles with Terraform, you have two options:
+
+**Option 1: Environment Variable**
+
+```bash
+export AWS_PROFILE=scale-dev
+terraform plan  # Uses scale-dev profile automatically
+```
+
+**Option 2: Provider Configuration**
+
+```hcl
+# In your Terraform code
+provider "aws" {
+  region  = "us-east-1"
+  profile = "scale-dev"
+}
+```
+
+### Prevention for Teams
+
+**If multiple team members encounter this:**
+
+**1. Document SSO setup in README:**
+
+````markdown
+## AWS Authentication
+
+This project uses AWS SSO. **Do not** use `[default]` credentials.
+
+### Initial Setup
+
+```bash
+# Configure SSO
+aws configure sso
+
+# Set default profile
+echo 'export AWS_PROFILE=scale-dev' >> ~/.zshrc
+source ~/.zshrc
+```
+````
+
+### Daily Workflow
+
+```bash
+# Login when session expires (typically every 8-12 hours)
+aws sso login
+
+# Verify authentication
+aws sts get-caller-identity
+```
+
+**2. Add to onboarding checklist:**
+
+- [ ] Install AWS CLI v2
+- [ ] Run `aws configure sso` with Scale SSO URL
+- [ ] Add `export AWS_PROFILE=scale-dev` to shell profile
+- [ ] Remove any `[default]` credentials from `~/.aws/credentials`
+- [ ] Test: `aws sts get-caller-identity` should show your identity
+
+**3. Common troubleshooting:**
+
+| Symptom                                        | Cause                           | Solution                             |
+| ---------------------------------------------- | ------------------------------- | ------------------------------------ |
+| `InvalidToken` error                           | Expired `[default]` credentials | Set `AWS_PROFILE=scale-dev`          |
+| `ExpiredToken` error                           | SSO session expired             | Run `aws sso login`                  |
+| `AccessDenied` error                           | Using wrong profile/account     | Verify `aws sts get-caller-identity` |
+| Commands work with `--profile` but not without | `AWS_PROFILE` not set           | `export AWS_PROFILE=scale-dev`       |
+
+### Debugging Commands Reference
+
+```bash
+# View credentials file (safely - only first 20 lines, suppress errors)
+cat ~/.aws/credentials 2>/dev/null | head -20
+
+# View config file
+cat ~/.aws/config 2>/dev/null | head -20
+
+# Check active identity
+aws sts get-caller-identity
+
+# Check identity for specific profile
+aws sts get-caller-identity --profile scale-dev
+
+# Check environment variables
+env | grep -E '^AWS_'
+
+# Test S3 access
+aws s3 ls --profile scale-dev
+
+# List available profiles
+aws configure list-profiles
+```
+
+### Why This Happens to Teams Migrating to SSO
+
+Many teams initially used IAM users with static access keys stored in the `[default]` profile:
+
+```ini
+# Old approach (before SSO)
+[default]
+aws_access_key_id=AKIA...
+aws_secret_access_key=...
+```
+
+When migrating to AWS SSO:
+
+1. SSO profiles are configured (`scale-dev`, `scale-prod`, etc.)
+2. Old `[default]` credentials remain in the file
+3. Those credentials eventually expire (especially if they were temporary)
+4. Commands without `--profile` flag still try to use expired `[default]`
+
+**Solution:** Clean up old credentials and standardize on SSO profiles across the team.
+
+---
