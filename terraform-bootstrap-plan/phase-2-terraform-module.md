@@ -162,7 +162,7 @@
   variable "lock_table_name" {
     description = "Name of the DynamoDB table for state locking"
     type        = string
-    default     = "scale-terraform-locks"
+    default     = "mycompany-terraform-locks"
   }
 
   variable "environment" {
@@ -243,13 +243,13 @@
   module "terraform_backend" {
   source = "../../modules/terraform-state-backend"
 
-  bucket_name = "scale-terraform-state-dev"
-  lock_table_name = "scale-terraform-locks"
+  bucket_name = "mycompany-terraform-state-dev"
+  lock_table_name = "mycompany-terraform-locks"
   environment = "dev"
 
   common_tags = {
   ManagedBy = "Terraform"
-  Repository = "scale.infra-terraform-bootstrap"
+  Repository = "mycompany.infra-terraform-bootstrap"
   }
   }
   \`\`\`

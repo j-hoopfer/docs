@@ -466,7 +466,7 @@ SSO registration scopes [None]: sso:account:access
 
 There are 3 AWS accounts available to you.
 
-> scale-poc (123456789012)
+> mycompany-poc (123456789012)
 > scale-dev (234567890123)
 > scale-prod (345678901234)
 
@@ -487,7 +487,7 @@ There are 3 AWS accounts available to you.
 
 CLI default client Region [None]: us-east-1
 CLI default output format [None]: json
-CLI profile name [AdministratorAccess-123456789012]: scale-poc
+CLI profile name [AdministratorAccess-123456789012]: mycompany-poc
 
 ````
 
@@ -517,7 +517,7 @@ cat ~/.aws/config
 **Expected output:**
 
 ```ini
-[profile scale-poc]
+[profile mycompany-poc]
 sso_session = scale
 sso_account_id = 123456789012
 sso_role_name = AdministratorAccess
@@ -551,7 +551,7 @@ sso_registration_scopes = sso:account:access
 ### Login to AWS SSO (All Platforms)
 
 ```bash
-aws sso login --profile scale-poc
+aws sso login --profile mycompany-poc
 ```
 
 **Expected behavior:**
@@ -566,7 +566,7 @@ aws sso login --profile scale-poc
 
 ```bash
 # Test POC account
-aws sts get-caller-identity --profile scale-poc
+aws sts get-caller-identity --profile mycompany-poc
 ```
 
 **Expected output:**
@@ -583,7 +583,7 @@ aws sts get-caller-identity --profile scale-poc
 
 ```bash
 # Test each profile
-for profile in scale-poc scale-dev scale-prod; do
+for profile in mycompany-poc scale-dev scale-prod; do
   echo "Testing $profile..."
   aws sts get-caller-identity --profile $profile --query 'Account' --output text
 done
@@ -592,7 +592,7 @@ done
 **Expected output:**
 
 ```
-Testing scale-poc...
+Testing mycompany-poc...
 123456789012
 Testing scale-dev...
 234567890123
@@ -610,7 +610,7 @@ To avoid typing `--profile` on every command, set a default.
 
 ```bash
 # Add to ~/.zshrc (macOS default) or ~/.bashrc (Linux)
-echo 'export AWS_PROFILE=scale-poc' >> ~/.zshrc
+echo 'export AWS_PROFILE=mycompany-poc' >> ~/.zshrc
 
 # Reload shell
 source ~/.zshrc  # or source ~/.bashrc
@@ -620,7 +620,7 @@ source ~/.zshrc  # or source ~/.bashrc
 
 ```powershell
 # Add to PowerShell profile
-Add-Content $PROFILE "`n`$env:AWS_PROFILE='scale-poc'"
+Add-Content $PROFILE "`n`$env:AWS_PROFILE='mycompany-poc'"
 
 # Reload profile (or restart PowerShell)
 . $PROFILE
@@ -630,17 +630,17 @@ Add-Content $PROFILE "`n`$env:AWS_PROFILE='scale-poc'"
 
 ```cmd
 # Set for current session only
-set AWS_PROFILE=scale-poc
+set AWS_PROFILE=mycompany-poc
 
 # Set permanently
-setx AWS_PROFILE scale-poc
+setx AWS_PROFILE mycompany-poc
 ```
 
 **Verify default profile (All Platforms):**
 
 ```bash
 aws sts get-caller-identity
-# Should use scale-poc without --profile flag
+# Should use mycompany-poc without --profile flag
 ```
 
 ---
@@ -794,13 +794,13 @@ git config --global user.email
 
 ```bash
 # Verify SSO login
-aws sso login --profile scale-poc
+aws sso login --profile mycompany-poc
 
 # Verify API access
-aws sts get-caller-identity --profile scale-poc
+aws sts get-caller-identity --profile mycompany-poc
 
 # Verify S3 access (should list buckets or return empty array)
-aws s3 ls --profile scale-poc
+aws s3 ls --profile mycompany-poc
 ```
 
 **Expected:** No authentication errors, account ID matches your POC account.
@@ -831,7 +831,7 @@ rm -rf ~/.aws/sso/cache/
 rm -rf ~/.aws/cli/cache/
 
 # Re-login
-aws sso login --profile scale-poc
+aws sso login --profile mycompany-poc
 ```
 
 **Solution (Windows):**
@@ -842,7 +842,7 @@ Remove-Item -Recurse -Force "$env:USERPROFILE\.aws\sso\cache\"
 Remove-Item -Recurse -Force "$env:USERPROFILE\.aws\cli\cache\"
 
 # Re-login
-aws sso login --profile scale-poc
+aws sso login --profile mycompany-poc
 ```
 
 ### Issue: Terraform command not found after installation
@@ -874,26 +874,26 @@ $env:PATH -split ';' | Select-String terraform
 where.exe terraform
 ```
 
-### Issue: AWS CLI returns "The config profile (scale-poc) could not be found"
+### Issue: AWS CLI returns "The config profile (mycompany-poc) could not be found"
 
 **Solution (macOS/Linux):**
 
 ```bash
 # Verify profile exists
-cat ~/.aws/config | grep scale-poc
+cat ~/.aws/config | grep mycompany-poc
 
 # If missing, reconfigure:
-aws configure sso --profile scale-poc
+aws configure sso --profile mycompany-poc
 ```
 
 **Solution (Windows):**
 
 ```powershell
 # Verify profile exists
-Get-Content "$env:USERPROFILE\.aws\config" | Select-String scale-poc
+Get-Content "$env:USERPROFILE\.aws\config" | Select-String mycompany-poc
 
 # If missing, reconfigure:
-aws configure sso --profile scale-poc
+aws configure sso --profile mycompany-poc
 ```
 
 ### Issue: SSO session expires frequently
@@ -903,7 +903,7 @@ aws configure sso --profile scale-poc
 ```bash
 # Sessions expire after 8 hours by default
 # Just re-login when prompted:
-aws sso login --profile scale-poc
+aws sso login --profile mycompany-poc
 
 # Or extend session duration (if your org allows):
 # Edit ~/.aws/config (macOS/Linux) or %USERPROFILE%\.aws\config (Windows)
@@ -936,7 +936,7 @@ Set-Service -Name ssh-agent -StartupType Automatic
 
 ```bash
 # If you see: "The SSO session associated with this profile has expired..."
-aws sso login --profile scale-poc
+aws sso login --profile mycompany-poc
 ```
 
 **How often?**

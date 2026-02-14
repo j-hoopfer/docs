@@ -2,7 +2,7 @@
 
 **Purpose:** Initialize Terraform state management infrastructure across AWS accounts and regions for Scale's cloud infrastructure.
 
-**Repository:** `scale.infra-terraform-bootstrap`
+**Repository:** `mycompany.infra-terraform-bootstrap`
 
 **Scope:** One-time setup per AWS account to create S3 state buckets, DynamoDB lock tables, and IAM policies required for safe Terraform operations.
 
@@ -69,7 +69,7 @@ Per AWS Account (in primary region):
 **State Organization:** Use S3 key prefixes to separate regions
 
 ```
-s3://scale-terraform-state-{account}/
+s3://mycompany-terraform-state-{account}/
 ├── us-east-1/
 │   ├── 00-network/terraform.tfstate
 │   └── 10-application/terraform.tfstate
@@ -98,8 +98,8 @@ s3://scale-terraform-state-{account}/
 
 | Account      | Purpose              | State Bucket Name            |
 | ------------ | -------------------- | ---------------------------- |
-| `scale-dev`  | Active development   | `scale-terraform-state-dev`  |
-| `scale-prod` | Production workloads | `scale-terraform-state-prod` |
+| `scale-dev`  | Active development   | `{company}-terraform-state-dev`  |
+| `scale-prod` | Production workloads | `{company}-terraform-state-prod` |
 
 ### Architecture Diagram
 
@@ -109,7 +109,7 @@ s3://scale-terraform-state-{account}/
 │                                                                        │
 │  ┌────────────────────────────────┐  ┌──────────────────────────────┐  │
 │  │      Dev Account               │  │     Prod Account             │  │
-│  │      (123456789012)            │  │     (987654321098)           │  │
+│  │      (111111111111)            │  │     (222222222222)           │  │
 │  │                                │  │                              │  │
 │  │  ┌──────────────────────────┐  │  │  ┌────────────────────────┐  │  │
 │  │  │ S3: scale-terraform-     │  │  │  │ S3: scale-terraform-   │  │  │
@@ -127,8 +127,8 @@ s3://scale-terraform-state-{account}/
 │  │                                │  │  └────────────────────────┘  │  │
 │  │  ┌──────────────────────────┐  │  │                              │  │
 │  │  │ DynamoDB:                │  │  │  ┌────────────────────────┐  │  │
-│  │  │ scale-terraform-locks    │  │  │  │ DynamoDB:              │  │  │
-│  │  │                          │  │  │  │ scale-terraform-locks  │  │  │
+│  │  │ {company}-terraform-locks    │  │  │  │ DynamoDB:              │  │  │
+│  │  │                          │  │  │  │ {company}-terraform-locks  │  │  │
 │  │  │ Partition Key: LockID    │  │  │  │                        │  │  │
 │  │  │ Billing: On-Demand       │  │  │  │ Partition Key: LockID  │  │  │
 │  │  └──────────────────────────┘  │  │  │ Billing: On-Demand     │  │  │
@@ -161,7 +161,7 @@ Key Principles:
 ## Directory Structure
 
 ```
-scale.infra-terraform-bootstrap/
+mycompany.infra-terraform-bootstrap/
 ├── README.md
 ├── accounts/
 │   ├── dev/
@@ -187,8 +187,8 @@ scale.infra-terraform-bootstrap/
 **Step 3.1: Clone Repository**
 
 ```bash
-git clone git@github.com:scale/scale.infra-terraform-bootstrap.git
-cd scale.infra-terraform-bootstrap/accounts/dev
+git clone git@github.com:scale/mycompany.infra-terraform-bootstrap.git
+cd mycompany.infra-terraform-bootstrap/accounts/dev
 ```
 
 **Step 3.2: Configure Variables**
@@ -210,8 +210,8 @@ terraform apply
 
 **Step 3.4: Verify Resources Created**
 
-- S3 Bucket: `scale-terraform-state-dev`
-- DynamoDB Table: `scale-terraform-locks`
+- S3 Bucket: `{company}-terraform-state-dev`
+- DynamoDB Table: `{company}-terraform-locks`
 - Bucket versioning enabled
 - Encryption enabled (SSE-S3)
 
@@ -219,14 +219,14 @@ terraform apply
 Output will provide backend configuration for downstream projects:
 
 ```hcl
-# Copy this to scale-cloud-infrastructure/environments/dev/*/backend.tf
+# Copy this to {company}-cloud-infrastructure/environments/dev/*/backend.tf
 terraform {
   backend "s3" {
-    bucket         = "scale-terraform-state-dev"
+    bucket         = "mycompany-terraform-state-dev"
     key            = "{region}/{layer}/terraform.tfstate"  # Replace per layer
     region         = "us-east-1"
     encrypt        = true
-    dynamodb_table = "scale-terraform-locks"
+    dynamodb_table = "mycompany-terraform-locks"
   }
 }
 ```
@@ -294,8 +294,8 @@ Attach this policy to your IAM Identity Center permission sets or IAM groups:
         "s3:DeleteObject"
       ],
       "Resource": [
-        "arn:aws:s3:::scale-terraform-state-${var.environment}",
-        "arn:aws:s3:::scale-terraform-state-${var.environment}/*"
+        "arn:aws:s3:::{company}-terraform-state-${var.environment}",
+        "arn:aws:s3:::{company}-terraform-state-${var.environment}/*"
       ]
     },
     {
@@ -306,7 +306,7 @@ Attach this policy to your IAM Identity Center permission sets or IAM groups:
         "dynamodb:GetItem",
         "dynamodb:DeleteItem"
       ],
-      "Resource": "arn:aws:dynamodb:us-east-1:${var.account_id}:table/scale-terraform-locks"
+      "Resource": "arn:aws:dynamodb:us-east-1:${var.account_id}:table/{company}-terraform-locks"
     }
   ]
 }
@@ -329,8 +329,8 @@ Attach this policy to your IAM Identity Center permission sets or IAM groups:
         "s3:GetObjectVersion"
       ],
       "Resource": [
-        "arn:aws:s3:::scale-terraform-state-${var.environment}",
-        "arn:aws:s3:::scale-terraform-state-${var.environment}/*"
+        "arn:aws:s3:::{company}-terraform-state-${var.environment}",
+        "arn:aws:s3:::{company}-terraform-state-${var.environment}/*"
       ]
     },
     {
@@ -340,7 +340,7 @@ Attach this policy to your IAM Identity Center permission sets or IAM groups:
         "dynamodb:GetItem",
         "dynamodb:Scan"
       ],
-      "Resource": "arn:aws:dynamodb:us-east-1:${var.account_id}:table/scale-terraform-locks"
+      "Resource": "arn:aws:dynamodb:us-east-1:${var.account_id}:table/{company}-terraform-locks"
     }
   ]
 }
@@ -392,14 +392,14 @@ Once bootstrap is complete, reference the backend in all infrastructure projects
 ### Network Layer Example
 
 ```hcl
-# scale-cloud-infrastructure/environments/dev/us-east-1/00-network/backend.tf
+# {company}-cloud-infrastructure/environments/dev/us-east-1/00-network/backend.tf
 terraform {
   backend "s3" {
-    bucket         = "scale-terraform-state-dev"
+    bucket         = "mycompany-terraform-state-dev"
     key            = "us-east-1/00-network/terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
-    dynamodb_table = "scale-terraform-locks"
+    dynamodb_table = "mycompany-terraform-locks"
   }
 }
 ```
@@ -407,14 +407,14 @@ terraform {
 ### Application Layer Example
 
 ```hcl
-# scale-cloud-infrastructure/environments/dev/us-east-1/10-application/backend.tf
+# {company}-cloud-infrastructure/environments/dev/us-east-1/10-application/backend.tf
 terraform {
   backend "s3" {
-    bucket         = "scale-terraform-state-dev"
+    bucket         = "mycompany-terraform-state-dev"
     key            = "us-east-1/10-application/terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
-    dynamodb_table = "scale-terraform-locks"
+    dynamodb_table = "mycompany-terraform-locks"
   }
 }
 ```
@@ -422,14 +422,14 @@ terraform {
 ### Database Layer Example
 
 ```hcl
-# scale-cloud-infrastructure/environments/dev/us-east-1/20-database/backend.tf
+# {company}-cloud-infrastructure/environments/dev/us-east-1/20-database/backend.tf
 terraform {
   backend "s3" {
-    bucket         = "scale-terraform-state-dev"
+    bucket         = "mycompany-terraform-state-dev"
     key            = "us-east-1/20-database/terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
-    dynamodb_table = "scale-terraform-locks"
+    dynamodb_table = "mycompany-terraform-locks"
   }
 }
 ```
@@ -437,21 +437,21 @@ terraform {
 ### Multi-Region Application Example
 
 ```hcl
-# scale-cloud-infrastructure/environments/dev/us-west-2/10-application/backend.tf
+# {company}-cloud-infrastructure/environments/dev/us-west-2/10-application/backend.tf
 terraform {
   backend "s3" {
-    bucket         = "scale-terraform-state-dev"
+    bucket         = "mycompany-terraform-state-dev"
     key            = "us-west-2/10-application/terraform.tfstate"  # Different region in key
     region         = "us-east-1"  # Bucket location stays the same
     encrypt        = true
-    dynamodb_table = "scale-terraform-locks"
+    dynamodb_table = "mycompany-terraform-locks"
   }
 }
 ```
 
 **Key Points:**
 
-- **One bucket per account** (`scale-terraform-state-dev` for all Dev account infrastructure)
+- **One bucket per account** (`{company}-terraform-state-dev` for all Dev account infrastructure)
 - **Organization via S3 key paths** (region/layer pattern)
 - **Same DynamoDB table** for locking across all layers
 - **Bucket region** is always the primary region (us-east-1), regardless of where resources are deployed
@@ -478,11 +478,11 @@ terraform {
 
 ```bash
 # Restore from S3 version
-aws s3api list-object-versions --bucket scale-terraform-state-prod \
+aws s3api list-object-versions --bucket {company}-terraform-state-prod \
   --prefix us-east-1/00-network/terraform.tfstate
 
 # Download specific version
-aws s3api get-object --bucket scale-terraform-state-prod \
+aws s3api get-object --bucket {company}-terraform-state-prod \
   --key us-east-1/00-network/terraform.tfstate \
   --version-id {VERSION_ID} terraform.tfstate
 ```
@@ -525,9 +525,9 @@ After bootstrap:
 
 ## Next Steps
 
-1. Create `scale.infra-terraform-bootstrap` repository
+1. Create `mycompany.infra-terraform-bootstrap` repository
 2. Run bootstrap for Dev account
-3. Integrate backend config into `scale-cloud-infrastructure`
+3. Integrate backend config into `{company}-cloud-infrastructure`
 4. Run bootstrap for Prod account when approved
 
 ---

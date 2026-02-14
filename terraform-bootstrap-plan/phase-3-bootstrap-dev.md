@@ -32,13 +32,13 @@
   module "terraform_backend" {
     source = "../../modules/terraform-state-backend"
 
-    bucket_name     = "scale-terraform-state-${var.environment}"
-    lock_table_name = "scale-terraform-locks"
+    bucket_name     = "mycompany-terraform-state-${var.environment}"
+    lock_table_name = "mycompany-terraform-locks"
     environment     = var.environment
 
     common_tags = {
       ManagedBy   = "Terraform"
-      Repository  = "scale.infra-terraform-bootstrap"
+      Repository  = "mycompany.infra-terraform-bootstrap"
       Environment = var.environment
       AccountID   = var.aws_account_id
     }
@@ -92,7 +92,7 @@
     region = var.primary_region
 
     # Uncomment if using AWS SSO profile
-    # profile = "scale-dev"
+    # profile = "mycompany-dev"
   }
   ```
 
@@ -169,8 +169,8 @@
 
   ```bash
   # Option A: AWS SSO
-  aws sso login --profile scale-dev
-  export AWS_PROFILE=scale-dev
+  aws sso login --profile mycompany-dev
+  export AWS_PROFILE=mycompany-dev
 
   # Option B: Set profile in providers.tf
   # Uncomment the profile line in providers.tf
@@ -257,17 +257,17 @@
 
   terraform {
     backend "s3" {
-      bucket         = "scale-terraform-state-dev"
+      bucket         = "mycompany-terraform-state-dev"
       key            = "{region}/{layer}/terraform.tfstate"
       region         = "us-east-1"
       encrypt        = true
-      dynamodb_table = "scale-terraform-locks"
+      dynamodb_table = "mycompany-terraform-locks"
     }
   }
   EOT
   iam_policy_arn = "arn:aws:iam::123456789012:policy/terraform-state-access-dev"
-  lock_table = "scale-terraform-locks"
-  state_bucket = "scale-terraform-state-dev"
+  lock_table = "mycompany-terraform-locks"
+  state_bucket = "mycompany-terraform-state-dev"
   ```
 
   #### 6) Capture Backend Configuration
@@ -280,13 +280,13 @@
 
   **S3 Bucket:**
   - Navigate to S3 → Buckets
-  - Find `scale-terraform-state-dev`
+  - Find `{company}-terraform-state-dev`
   - Properties → Versioning: **Enabled**
   - Properties → Encryption: **Enabled (AES-256)**
 
   **DynamoDB Table:**
   - Navigate to DynamoDB → Tables
-  - Find `scale-terraform-locks`
+  - Find `{company}-terraform-locks`
   - Billing mode: **On-demand**
   - Partition key: **LockID (String)**
 
@@ -297,10 +297,10 @@
 
 - **Acceptance Criteria:**
   - ✅ `terraform apply` completes without errors
-  - ✅ S3 bucket `scale-terraform-state-dev` exists
+  - ✅ S3 bucket `{company}-terraform-state-dev` exists
   - ✅ Bucket has versioning enabled
   - ✅ Bucket has encryption enabled
-  - ✅ DynamoDB table `scale-terraform-locks` exists with `LockID` key
+  - ✅ DynamoDB table `{company}-terraform-locks` exists with `LockID` key
   - ✅ IAM policy created for state access
   - ✅ Backend configuration output saved
 
@@ -334,11 +334,11 @@
   # main.tf
   terraform {
     backend "s3" {
-      bucket         = "scale-terraform-state-dev"
+      bucket         = "mycompany-terraform-state-dev"
       key            = "test/vpc/terraform.tfstate"
       region         = "us-east-1"
       encrypt        = true
-      dynamodb_table = "scale-terraform-locks"
+      dynamodb_table = "mycompany-terraform-locks"
     }
 
     required_providers {
@@ -407,11 +407,11 @@
   #### 5) Verify State in S3
 
   ```bash
-  aws s3 ls s3://scale-terraform-state-dev/test/vpc/
+  aws s3 ls s3://mycompany-terraform-state-dev/test/vpc/
   # Should show: terraform.tfstate
 
   # Download and inspect (optional)
-  aws s3 cp s3://scale-terraform-state-dev/test/vpc/terraform.tfstate /tmp/state.json
+  aws s3 cp s3://mycompany-terraform-state-dev/test/vpc/terraform.tfstate /tmp/state.json
   cat /tmp/state.json | jq '.resources[] | select(.type=="aws_vpc")'
   ```
 
@@ -434,7 +434,7 @@
   Error message: ConditionalCheckFailedException: The conditional request failed
   Lock Info:
     ID:        abc-123-xyz
-    Path:      scale-terraform-state-dev/test/vpc/terraform.tfstate
+    Path:      {company}-terraform-state-dev/test/vpc/terraform.tfstate
     Operation: OperationTypePlan
     Who:       your-username@hostname
     ...
@@ -446,7 +446,7 @@
   terraform destroy -auto-approve
 
   # Delete state file from S3
-  aws s3 rm s3://scale-terraform-state-dev/test/vpc/terraform.tfstate
+  aws s3 rm s3://mycompany-terraform-state-dev/test/vpc/terraform.tfstate
 
   # Remove test directory
   cd ~
@@ -471,8 +471,8 @@ Complete this checklist before proceeding to Phase 4:
 - [ ] `terraform.tfvars` created with actual Dev account ID
 - [ ] AWS credentials verified for Dev account
 - [ ] `terraform apply` completed successfully
-- [ ] S3 bucket `scale-terraform-state-dev` exists with versioning/encryption
-- [ ] DynamoDB table `scale-terraform-locks` created
+- [ ] S3 bucket `{company}-terraform-state-dev` exists with versioning/encryption
+- [ ] DynamoDB table `{company}-terraform-locks` created
 - [ ] Backend configuration saved to `BACKEND_CONFIG_DEV.txt`
 - [ ] Test VPC project validated remote backend works
 - [ ] Test resources cleaned up

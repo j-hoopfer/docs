@@ -29,13 +29,13 @@
 
   ```bash
   # Using GitHub CLI
-  gh repo create scale/scale.infra-terraform-bootstrap \
+  gh repo create mycompany/mycompany.infra-terraform-bootstrap \
     --private \
     --description "Terraform state backend bootstrap for Dev/Prod accounts"
 
   # Or create via GitHub web UI:
-  # - Navigate to github.com/scale
-  # - New repository → scale.infra-terraform-bootstrap
+  # - Navigate to github.com/mycompany
+  # - New repository → mycompany.infra-terraform-bootstrap
   # - Private
   # - Do NOT initialize with README
   ```
@@ -43,8 +43,8 @@
   #### 2) Clone Locally
 
   ```bash
-  git clone git@github.com:scale/scale.infra-terraform-bootstrap.git
-  cd scale.infra-terraform-bootstrap
+  git clone git@github.com:mycompany/mycompany.infra-terraform-bootstrap.git
+  cd mycompany.infra-terraform-bootstrap
   ```
 
   #### 3) Create Directory Structure
@@ -60,7 +60,7 @@
   **Expected structure:**
 
   ```
-  scale.infra-terraform-bootstrap/
+  mycompany.infra-terraform-bootstrap/
   ├── modules/
   │   └── terraform-state-backend/
   └── accounts/
@@ -76,7 +76,7 @@
   ```
 
 - **Acceptance Criteria:**
-  - ✅ Repository exists at `github.com/scale/scale.infra-terraform-bootstrap`
+  - ✅ Repository exists at `github.com/mycompany/mycompany.infra-terraform-bootstrap`
   - ✅ Repository is private
   - ✅ `modules/` and `accounts/` directories created
   - ✅ Local clone exists and is on `main` branch
@@ -132,7 +132,7 @@
 
   ```bash
   cat > README.md << 'EOF'
-  # Scale Terraform Bootstrap
+  # Terraform Bootstrap
 
   **Purpose:** One-time setup to create Terraform state infrastructure (S3 + DynamoDB) for Dev and Prod AWS accounts.
 
@@ -148,7 +148,7 @@
 
   ```
 
-  scale.infra-terraform-bootstrap/
+  mycompany.infra-terraform-bootstrap/
   ├── modules/terraform-state-backend/ # Reusable module
   └── accounts/ # Account-specific configs
   ├── poc/
@@ -192,11 +192,11 @@
   ```hcl
   terraform {
     backend "s3" {
-      bucket         = "scale-terraform-state-dev"
+      bucket         = "mycompany-terraform-state-dev"
       key            = "{region}/{layer}/terraform.tfstate"
       region         = "us-east-1"
       encrypt        = true
-      dynamodb_table = "scale-terraform-locks"
+      dynamodb_table = "mycompany-terraform-locks"
     }
   }
   ```
@@ -240,7 +240,7 @@
 
 Complete this checklist before proceeding to Phase 2:
 
-- [ ] GitHub repository `scale/scale.infra-terraform-bootstrap` created
+- [ ] GitHub repository `mycompany/mycompany.infra-terraform-bootstrap` created
 - [ ] Repository is private
 - [ ] Directory structure created (`modules/`, `accounts/`)
 - [ ] `.gitignore` configured properly

@@ -54,11 +54,11 @@
 
     # Backend configuration (uncommented after initial bootstrap)
     backend "s3" {
-      bucket         = "scale-terraform-state-poc"
+      bucket         = "mycompany-terraform-state-poc"
       key            = "bootstrap/terraform.tfstate"
       region         = "us-east-1"
       encrypt        = true
-      dynamodb_table = "scale-terraform-locks"
+      dynamodb_table = "mycompany-terraform-locks"
     }
   }
 
@@ -66,7 +66,7 @@
     region = var.primary_region
 
     # Uncomment if using AWS SSO profile
-    # profile = "scale-poc"
+    # profile = "mycompany-poc"
   }
   ```
 
@@ -76,7 +76,7 @@
   cd accounts/poc
 
   # Ensure correct AWS credentials
-  export AWS_PROFILE=scale-poc
+  export AWS_PROFILE=mycompany-poc
   aws sts get-caller-identity
 
   # Migrate state
@@ -112,7 +112,7 @@
   #### 3) Verify State in S3
 
   ```bash
-  aws s3 ls s3://scale-terraform-state-poc/bootstrap/
+  aws s3 ls s3://mycompany-terraform-state-poc/bootstrap/
   # Should show: terraform.tfstate
   ```
 
@@ -120,7 +120,7 @@
 
   ```bash
   # Download state file
-  aws s3 cp s3://scale-terraform-state-poc/bootstrap/terraform.tfstate /tmp/bootstrap-state.json
+  aws s3 cp s3://mycompany-terraform-state-poc/bootstrap/terraform.tfstate /tmp/bootstrap-state.json
 
   # Check for resources
   cat /tmp/bootstrap-state.json | jq '.resources[].type'
@@ -150,7 +150,7 @@
 - **Acceptance Criteria:**
   - ✅ Backend block added to `providers.tf`
   - ✅ `terraform init -migrate-state` completes successfully
-  - ✅ State file exists at `s3://scale-terraform-state-poc/bootstrap/terraform.tfstate`
+  - ✅ State file exists at `s3://mycompany-terraform-state-poc/bootstrap/terraform.tfstate`
   - ✅ Local `terraform.tfstate` files deleted
   - ✅ `terraform plan` works with remote state
   - ✅ No local state files remain in directory
@@ -172,7 +172,7 @@
   #### 1) Migrate Dev Account
 
   ```bash
-  cd scale.infra-terraform-bootstrap/accounts/dev
+  cd mycompany.infra-terraform-bootstrap/accounts/dev
   ```
 
   **Update `providers.tf`:**
@@ -189,11 +189,11 @@
     }
 
     backend "s3" {
-      bucket         = "scale-terraform-state-dev"
+      bucket         = "mycompany-terraform-state-dev"
       key            = "bootstrap/terraform.tfstate"
       region         = "us-east-1"
       encrypt        = true
-      dynamodb_table = "scale-terraform-locks"
+      dynamodb_table = "mycompany-terraform-locks"
     }
   }
 
@@ -210,7 +210,7 @@
   # Type "yes" when prompted
 
   # Verify
-  aws s3 ls s3://scale-terraform-state-dev/bootstrap/
+  aws s3 ls s3://mycompany-terraform-state-dev/bootstrap/
 
   # Clean up
   rm -f terraform.tfstate*
@@ -219,7 +219,7 @@
   #### 2) Migrate Prod Account
 
   ```bash
-  cd scale.infra-terraform-bootstrap/accounts/prod
+  cd mycompany.infra-terraform-bootstrap/accounts/prod
   ```
 
   **Update `providers.tf`:**
@@ -236,11 +236,11 @@
     }
 
     backend "s3" {
-      bucket         = "scale-terraform-state-prod"
+      bucket         = "mycompany-terraform-state-prod"
       key            = "bootstrap/terraform.tfstate"
       region         = "us-east-1"
       encrypt        = true
-      dynamodb_table = "scale-terraform-locks"
+      dynamodb_table = "mycompany-terraform-locks"
     }
   }
 
@@ -257,7 +257,7 @@
   # Type "yes" when prompted
 
   # Verify
-  aws s3 ls s3://scale-terraform-state-prod/bootstrap/
+  aws s3 ls s3://mycompany-terraform-state-prod/bootstrap/
 
   # Clean up
   rm -f terraform.tfstate*
@@ -286,7 +286,7 @@
   #### 1) Review Changes
 
   ```bash
-  cd scale.infra-terraform-bootstrap
+  cd mycompany.infra-terraform-bootstrap
 
   git status
   # Should show modified: accounts/poc/providers.tf
@@ -316,9 +316,9 @@
   ## State Storage
 
   - **Bootstrap State:** Stored in S3 (migrated from local)
-    - POC: `s3://scale-terraform-state-poc/bootstrap/terraform.tfstate`
-    - Dev: `s3://scale-terraform-state-dev/bootstrap/terraform.tfstate`
-    - Prod: `s3://scale-terraform-state-prod/bootstrap/terraform.tfstate`
+    - POC: `s3://mycompany-terraform-state-poc/bootstrap/terraform.tfstate`
+    - Dev: `s3://mycompany-terraform-state-dev/bootstrap/terraform.tfstate`
+    - Prod: `s3://mycompany-terraform-state-prod/bootstrap/terraform.tfstate`
 
   - **Infrastructure State:** Managed by downstream projects using backend configs from bootstrap outputs
   ```
@@ -359,21 +359,15 @@ Complete this checklist to finish bootstrap migration:
 Test in each account:
 
 ```bash
-# POC
-cd accounts/poc
-export AWS_PROFILE=scale-poc
-terraform plan
-# Should show: "No changes"
-
 # Dev
 cd ../dev
-export AWS_PROFILE=scale-dev
+export AWS_PROFILE=mycompany-dev
 terraform plan
 # Should show: "No changes"
 
 # Prod
 cd ../prod
-export AWS_PROFILE=scale-prod
+export AWS_PROFILE=mycompany-prod
 terraform plan
 # Should show: "No changes"
 ```
@@ -381,7 +375,7 @@ terraform plan
 ### Verify No Local State
 
 ```bash
-cd scale.infra-terraform-bootstrap
+cd mycompany.infra-terraform-bootstrap
 
 # Should find NO .tfstate files
 find . -name "*.tfstate" -o -name "*.tfstate.*"
@@ -391,14 +385,11 @@ find . -name "*.tfstate" -o -name "*.tfstate.*"
 ### Verify State in S3
 
 ```bash
-# POC
-aws s3 ls s3://scale-terraform-state-poc/bootstrap/ --profile scale-poc
-
 # Dev
-aws s3 ls s3://scale-terraform-state-dev/bootstrap/ --profile scale-dev
+aws s3 ls s3://mycompany-terraform-state-dev/bootstrap/ --profile mycompany-dev
 
 # Prod
-aws s3 ls s3://scale-terraform-state-prod/bootstrap/ --profile scale-prod
+aws s3 ls s3://mycompany-terraform-state-prod/bootstrap/ --profile mycompany-prod
 ```
 
 All should show `terraform.tfstate`.
@@ -439,8 +430,8 @@ Another Terraform process is running or crashed. Delete the lock:
 
 ```bash
 aws dynamodb delete-item \
-  --table-name scale-terraform-locks \
-  --key '{"LockID": {"S": "scale-terraform-state-poc/bootstrap/terraform.tfstate"}}'
+  --table-name {company}-terraform-locks \
+  --key '{"LockID": {"S": "mycompany-terraform-state-poc/bootstrap/terraform.tfstate"}}'
 ```
 
 ### Issue: Local State Not Found
@@ -456,7 +447,7 @@ No existing state was found to migrate
 You already migrated or deleted local state. Check S3:
 
 ```bash
-aws s3 ls s3://scale-terraform-state-poc/bootstrap/
+aws s3 ls s3://mycompany-terraform-state-poc/bootstrap/
 ```
 
 If state exists in S3, you're done. If not, you may need to import resources.

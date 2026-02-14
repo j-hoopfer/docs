@@ -43,7 +43,7 @@ After bootstrapping your Terraform state infrastructure, you need to grant your 
 **Create OIDC Provider (One-time per account):**
 
 ```hcl
-# Add to scale-cloud-infrastructure/environments/{env}/global/iam/github-oidc.tf
+# Add to {company}-cloud-infrastructure/environments/{env}/global/iam/github-oidc.tf
 resource "aws_iam_openid_connect_provider" "github_actions" {
   url = "https://token.actions.githubusercontent.com"
 
@@ -69,7 +69,7 @@ resource "aws_iam_openid_connect_provider" "github_actions" {
 **Verify OIDC Provider:**
 
 ```bash
-aws iam list-open-id-connect-providers --profile scale-poc
+aws iam list-open-id-connect-providers --profile mycompany-poc
 ```
 
 **Expected Output:**
@@ -104,7 +104,7 @@ aws iam list-open-id-connect-providers --profile scale-poc
 **Create IAM Role:**
 
 ```hcl
-# scale-cloud-infrastructure/environments/{env}/global/iam/github-terraform-role.tf
+# {company}-cloud-infrastructure/environments/{env}/global/iam/github-terraform-role.tf
 resource "aws_iam_role" "github_actions_terraform" {
   name        = "GitHubActions-Terraform-${var.environment}"
   description = "Role for GitHub Actions to run Terraform in ${var.environment}"
@@ -125,7 +125,7 @@ resource "aws_iam_role" "github_actions_terraform" {
           StringLike = {
             # Restrict to specific repos or organization
             "token.actions.githubusercontent.com:sub" = [
-              "repo:scale/scale-cloud-infrastructure:*",
+              "repo:scale/{company}-cloud-infrastructure:*",
               "repo:scale/scale-application:*"
             ]
           }
@@ -159,8 +159,8 @@ resource "aws_iam_role_policy" "github_terraform_state_access" {
           "s3:DeleteObject"
         ]
         Resource = [
-          "arn:aws:s3:::scale-terraform-state-${var.environment}",
-          "arn:aws:s3:::scale-terraform-state-${var.environment}/*"
+          "arn:aws:s3:::{company}-terraform-state-${var.environment}",
+          "arn:aws:s3:::{company}-terraform-state-${var.environment}/*"
         ]
       },
       {
@@ -171,7 +171,7 @@ resource "aws_iam_role_policy" "github_terraform_state_access" {
           "dynamodb:GetItem",
           "dynamodb:DeleteItem"
         ]
-        Resource = "arn:aws:dynamodb:${var.primary_region}:${var.account_id}:table/scale-terraform-locks"
+        Resource = "arn:aws:dynamodb:${var.primary_region}:${var.account_id}:table/{company}-terraform-locks"
       }
     ]
   })
@@ -199,7 +199,7 @@ output "github_actions_terraform_role_arn" {
 **Apply the configuration:**
 
 ```bash
-cd scale-cloud-infrastructure/environments/poc/global/iam
+cd {company}-cloud-infrastructure/environments/poc/global/iam
 terraform init
 terraform apply
 ```
@@ -440,7 +440,7 @@ resource "aws_iam_role" "gitlab_ci_terraform" {
             "gitlab.com:aud" = "https://gitlab.com"
           }
           StringLike = {
-            "gitlab.com:sub" = "project_path:scale/*:ref_type:branch:ref:main"
+            "gitlab.com:sub" = "project_path:{company}/*:ref_type:branch:ref:main"
           }
         }
       }
@@ -534,8 +534,8 @@ resource "aws_iam_user_policy" "jenkins_state_access" {
           "s3:DeleteObject"
         ]
         Resource = [
-          "arn:aws:s3:::scale-terraform-state-${var.environment}",
-          "arn:aws:s3:::scale-terraform-state-${var.environment}/*"
+          "arn:aws:s3:::{company}-terraform-state-${var.environment}",
+          "arn:aws:s3:::{company}-terraform-state-${var.environment}/*"
         ]
       },
       {
@@ -546,7 +546,7 @@ resource "aws_iam_user_policy" "jenkins_state_access" {
           "dynamodb:GetItem",
           "dynamodb:DeleteItem"
         ]
-        Resource = "arn:aws:dynamodb:${var.primary_region}:${var.account_id}:table/scale-terraform-locks"
+        Resource = "arn:aws:dynamodb:${var.primary_region}:${var.account_id}:table/{company}-terraform-locks"
       }
     ]
   })
