@@ -23,3 +23,9 @@ when you're redirected to login, after logging in successfully it asks you a cou
 add a section about creaating a readme
 update the section about repo naming to incorporate the additional context
  
+
+2/15/26
+security-infrastructure and artifact-management are numbered wrong and missing business value for stories; same as what's in the initial-deployment
+need to remove Junior Engineer Context from the files
+make sure tflint is a part of the workflow
+need to fix the ci items added to the repo setup, and i want them to be setup like they are in the bootstrap plan

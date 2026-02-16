@@ -4,7 +4,6 @@
 
 This is a **comprehensive, phase-by-phase migration plan** for moving existing EC2-based applications to AWS ECS Fargate in a brownfield (existing production) environment. This plan orchestrates multiple specialized sub-plans to guide teams through a safe, zero-downtime migration, adopting the **12-Factor App** methodology.
 
-**Plan Type:** Meta-plan (Plan of Plans)  
 **Audience:** DevOps teams, platform engineers, technical leads  
 **Scope:** Complete brownfield migration from EC2 to containerized Fargate workloads
 
@@ -18,19 +17,29 @@ This is a **comprehensive, phase-by-phase migration plan** for moving existing E
 
 ---
 
+## How to Use This Repository
+
+This repository acts as a **Meta-plan** (Plan of Plans). It coordinates multiple specialized sub-plans (found in `phase-*` directories or external folders like `terraform-state-bootstrap-plan`) to guide you through the entire migration journey.
+
+- **Start here**: Understand the high-level flow and dependencies.
+- **Drill down**: Follow links to specialized plans for implementation details.
+- **Contribute**: Updates should be atomic and focused on specific phases.
+
+---
+
 ## Plan Architecture
 
 This migration plan **references and coordinates** specialized plans for different aspects of the migration:
 
 ### 📋 Referenced Plans
 
-1. **[Terraform Bootstrap Plan](../terraform-bootstrap-plan/README.md)**
-   - Covered in: Phase -1, Story 3.2
+1. **[Terraform State Bootstrap Plan](../terraform-state-bootstrap-plan/README.md)**
+   - Covered in: Phase 0
    - Sets up Terraform state backend (S3 + DynamoDB)
    - Enables team collaboration on infrastructure code
-   - **Complete this before starting Phase 2**
+   - **Note:** This is a separate project with its own Phases (0-8). Complete at least Phases 0-5 of the Bootstrap Plan before proceeding to Phase 2 (Infrastructure Setup) of this migration.
 
-2. **[Prepare App for 12-Factor Plan](../prepare-app-for-12-factor-plan/README.md)** ⭐ **PREREQUISITE**
+2. **[Prepare App for 12-Factor Plan](phase-2-application-readiness/12-factor-prep/README.md)** ⭐ **PREREQUISITE**
    - **Must complete before containerization**
    - Externalizes configuration and secrets
    - Eliminates ephemeral filesystem dependencies
@@ -42,7 +51,7 @@ This migration plan **references and coordinates** specialized plans for differe
    - **Duration:** 2-4 weeks
    - **Can be validated on EC2 before Docker**
 
-3. **[Containerizing Services Plan](../containerizing-services-plan/README.md)** ⭐ **PREREQUISITE**
+3. **[Containerizing Services Plan](phase-2-application-readiness/containerizing-services/README.md)** ⭐ **PREREQUISITE**
    - **Must complete after 12-Factor preparation**
    - Creates production-ready Dockerfiles
    - Implements PID 1 handling and graceful shutdown
@@ -56,11 +65,6 @@ This migration plan **references and coordinates** specialized plans for differe
    - Authentication provider consolidation
    - SSO migration strategies
    - Identity federation patterns
-
-5. **[ECS Greenfield MVP Plan](../ecs-greenfield-mvp-plan/README.md)** _(reference for new patterns)_
-   - Modern ECS patterns for comparison
-   - Greenfield best practices
-   - Future-state architecture examples
 
 ---
 
@@ -188,23 +192,27 @@ graph TB
 
 This plan follows a phased approach with clear dependencies and checkpoints:
 
-### Phase -1: [Prerequisites & Local Setup](plan/phase-0-prerequisites.md)
+### Phase 0: Prerequisites
 
 - **Duration:** 1-2 days
-- **Deliverables:** AWS access, tools installed, repository structure
-- **References:** [Terraform Bootstrap Plan](../terraform-bootstrap-plan/README.md) for state backend
+- **Deliverables:**
+  - Developers onboarded
+  - Initialize the shared infrastructure repository.
+  - Initialize the application deployment repository.
 
-### Phase 0: [Discovery](plan/phase-1-discovery.md)
+### Phase 1: [Discovery](phase-1-discovery/README.md)
 
 - **Duration:** 3-5 days
-- **Deliverables:** Infrastructure inventory, migration blockers identified
+- **Deliverables:**
+  - Infrastructure inventory,
+  - migration blockers identified
 - **Checkpoint:** Discovery review meeting
 
-### Phase 1: Application Readiness ⭐ **NOW TWO SEPARATE PLANS**
+### Phase 2: Application Readiness
 
 **This phase has been split into two specialized plans for better team ownership:**
 
-#### Phase 1a: [Prepare App for 12-Factor Plan](../prepare-app-for-12-factor-plan/README.md)
+#### Phase 2a: [Prepare App for 12-Factor Plan](phase-2-application-readiness/12-factor-prep/README.md)
 
 - **Duration:** 2-4 weeks
 - **Team:** Development team
@@ -221,11 +229,11 @@ This plan follows a phased approach with clear dependencies and checkpoints:
 - **Checkpoint:** All changes validated on EC2 **before** containerization
 - **Key Benefit:** Can test 12-Factor patterns on existing EC2 infrastructure
 
-#### Phase 1b: [Containerizing Services Plan](../containerizing-services-plan/README.md)
+#### Phase 2b: [Containerizing Services Plan](phase-2-application-readiness/containerizing-services/README.md)
 
 - **Duration:** 1-2 weeks
 - **Team:** DevOps/Platform team
-- **Prerequisites:** Phase 1a complete and validated on EC2
+- **Prerequisites:** Phase 2a complete and validated on EC2
 - **Deliverables:**
   - Production-ready Dockerfiles
   - PID 1 handling (tini) configured
@@ -236,36 +244,41 @@ This plan follows a phased approach with clear dependencies and checkpoints:
   - docker-compose for local development
 - **Checkpoint:** Containers tested locally and pass all security scans
 
-### Phase 2: [Infrastructure Setup](plan/phase-3-infrastructure-setup.md)
+### Phase 3: [Infrastructure Setup](phase-3-infrastructure-setup/README.md)
 
-- **Duration:** 1-2 weeks
-- **Deliverables:** Imported existing infra, new Fargate infrastructure provisioned
-- **Checkpoint:** Infrastructure validated, zero production impact
+- **Duration:** 2-3 weeks
+- **Deliverables:**
+  - Imported existing network and application resources (Terraform)
+  - Shared Infrastructure Created (ALB, ECS Cluster, Service Discovery)
+  - Security Infrastructure (Security Groups, IAM Roles)
+  - Artifact Management (ECR Repositories)
+- **Checkpoint:** Infrastructure validated, state matches reality, zero production impact
 - **Key Story:** Import existing infrastructure to Terraform (brownfield-specific)
 
-### Phase 3: [Initial Deployment](plan/phase-4-initial-deployment.md)
+### Phase 4: [Initial Deployment](phase-4-initial-deployment/README.md)
 
 - **Duration:** 1 week
-- **Deliverables:** First application running on Fargate
+- **Deliverables:** First application running on Fargate, Reusable CI/CD templates, Task definitions
 - **Checkpoint:** First service deployed, health checks passing
 
-### Phase 4: [Deployment Artifacts](plan/phase-4-initial-deployment.md)
-
-- **Duration:** 3-5 days
-- **Deliverables:** Reusable CI/CD templates, Task definitions
-- **Checkpoint:** Pipeline successfully deploys to Fargate
-
-### Phase 5: [Scaling & Automation](plan/phase-5-scaling/README.md)
+### Phase 5: [Scaling & Automation](phase-5-scaling/README.md)
 
 - **Duration:** 1 week
 - **Deliverables:** Operational Excellence (Monitoring, Auto-scaling), IaC modules
 - **Checkpoint:** Systems ready for production scale without manual intervention
 
-### Phase 6: [Cutover & Cleanup](plan/phase-6-cutover-cleanup/README.md)
+### Phase 6: [Cutover & Cleanup](phase-6-cutover-cleanup/README.md)
 
 - **Duration:** 1-2 weeks
 - **Deliverables:** Strangler Fig routing, Traffic shifted, Legacy EC2 decommissioned
 - **Checkpoint:** 100% Traffic on Fargate, Old infrastructure terminated
+
+### Phase X: [Optimizations & Future Features](phase-x-optimizations/README.md)
+
+- **Duration:** Ongoing (Post-Migration)
+- **Deliverables:** Cost optimization, Enhanced security, Advanced networking
+- **Key Features:** Service Connect, Karpenter, Fargate Spot, Private Link
+- **Note:** These are "Day 2" operations to be tackled after the migration is stable.
 
 ---
 
@@ -274,7 +287,7 @@ This plan follows a phased approach with clear dependencies and checkpoints:
 ```
         ▼                       ▼
 ┌───────────────────┐   ┌───────────────────┐
-│ PHASE 1 (App)     │   │ PHASE 2 (Infra)   │
+│ PHASE 2 (App)     │   │ PHASE 3 (Infra)   │
 │ • Dockerfile      │   │ • VPC/Subnets     │
 │ • 12-factor fixes │   │ • ALB + ACM cert  │
 │ • Env vars        │   │ • ECS Cluster     │
@@ -286,7 +299,7 @@ This plan follows a phased approach with clear dependencies and checkpoints:
          └───────────┬───────────┘
                      ▼
          ┌───────────────────────┐
-         │ PHASE 3 & 4 (Setup)   │
+         │ PHASE 4 (Deploy)      │
          │ • Security groups     │
          │ • Task definition     │
          │ • ECS Service         │
@@ -362,118 +375,3 @@ Wave 3: Dependent Services
 Wave 4: Frontend / Gateway
 └── krakend / api-gw  ← Migrate last (routes to all services)
 ```
-
----
-
-## Migration Timeline & Dependencies
-
-```
-Phase -1: Prerequisites (1-2 days)
-    ↓
-Phase 0: Discovery (3-5 days)
-    ↓
-Phase 1a: 12-Factor App Preparation (2-4 weeks) ← Development Team
-    ↓ Validate on EC2
-Phase 1b: Containerization (1-2 weeks) ← DevOps Team
-    ↓ Test locally with Docker
-Phase 2: Infrastructure Setup (1-2 weeks)
-    ↓
-Phase 3: Initial Deployment (1 week)
-    ↓
-Phase 4: Deployment Artifacts (3-5 days)
-    ↓
-Phase 5: Scaling & Automation (1 week)
-    ↓
-Phase 6: Cutover & Cleanup (1-2 weeks)
-
-Total Duration: 8-16 weeks
-```
-
----
-
-## Key Differentiators (Brownfield Focus)
-
-This plan is specifically designed for **brownfield migrations** with existing production infrastructure:
-
-✅ **Import existing resources** into Terraform before creating new ones  
-✅ **Zero-downtime migration** with gradual traffic shifting  
-✅ **Coexistence period** where EC2 and Fargate run simultaneously  
-✅ **Rollback strategies** at every phase  
-✅ **Production-first mindset** with extensive validation gates
-
----
-
-## Appendix Documents
-
-These themed reference documents support the migration phases:
-
-### 1. [AWS Authentication and Security](appendix/aws-authentication-and-security.md)
-
-_Setting up AWS CLI access, configuring GitHub Actions authentication, and implementing security best practices._
-
-### 2. [ECS Deployment Fundamentals](appendix/ecs-deployment-fundamentals.md)
-
-_Understanding tasks, services, ALBs, and deployment sequences._
-
-### 3. [Networking and Security Groups](appendix/networking-and-security-groups.md)
-
-_Configuring shared vs service-specific security groups and network isolation._
-
-### 4. [GitHub Actions CI/CD](appendix/github-actions-cicd.md)
-
-_Setting up pipelines, secrets management, and reusable workflows._
-
-### 5. [Secrets Management](appendix/secrets-management.md)
-
-_Migrating from .env files to AWS Secrets Manager._
-
-### 6. [Troubleshooting and Operations](appendix/troubleshooting-and-operations.md)
-
-_Debugging deployment failures, task restarts, and networking issues._
-
-### 7. [Terraform Organization Guide](appendix/terraform-organization-guide.md)
-
-_Structure for brownfield migrations and state management._
-
-### 8. [Docker Base Image Strategy](appendix/docker-base-image-strategy.md)
-
-_Deciding on custom base images vs public images for security and standardization._
-
----
-
-## Quick Reference: Common Traps
-
-| Trap                            | Symptom                                  | Phase to Fix |
-| ------------------------------- | ---------------------------------------- | ------------ |
-| App binds to `localhost`        | Health checks fail, connection refused   | Phase 1      |
-| No NAT Gateway                  | Tasks stuck in PENDING, can't pull image | Phase 2      |
-| Database SG missing Fargate SG  | Database connection refused              | Phase 3      |
-| No `/health` endpoint           | Tasks killed before ready                | Phase 1      |
-| Secrets hardcoded               | Works locally, fails in Fargate          | Phase 1      |
-| Logs to files                   | Zero visibility into errors              | Phase 1      |
-| Wrong Docker architecture       | "exec format error"                      | Phase 1      |
-| Sessions in local memory        | Users randomly logged out                | Phase 1      |
-| Calling services via public URL | Latency + NAT costs                      | Phase 4      |
-
----
-
-## Success Criteria
-
-### Per Application
-
-- [ ] Container starts and passes health checks
-- [ ] CI/CD deploys automatically on push to main
-- [ ] Logs visible in CloudWatch
-- [ ] No secrets in code or Docker image
-- [ ] Handles traffic without errors
-- [ ] Graceful shutdown works
-
-### Overall Migration
-
-- [ ] All applications running on Fargate
-- [ ] EC2 instances terminated
-- [ ] Reusable workflow template in use
-- [ ] Auto-scaling configured
-- [ ] Monitoring and alerting active
-- [ ] Cost within expected range
-- [ ] Documentation complete

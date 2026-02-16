@@ -1,0 +1,1 @@
+**(Junior Engineer Context: Common blockers here include lacking AWS SSO permissions—ask your lead for "AWS Identity Center User Access" if blocked, or use `aws configure` with temp keys as a workaround. Also, use `tfenv` to match the project's Terraform version if `terraform init` fails.)**
