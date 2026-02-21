@@ -1,205 +1,104 @@
-# Activity 2: Import Application Layer (EC2, RDS, Security Groups)
+# Activity 2: Import Legacy Application Workloads (EC2)
 
-**Goal:** Bring existing compute and database resources under Terraform management to prepare for Fargate.
+**Goal:** Bring existing application compute resources (EC2) under Terraform management (`scale.infra-services`) to prepare for migration.
 
 ## Context & Themes
 
-This document specifically covers bringing the **stateful** and **compute** layers of your application under existing infrastructure management. This assumes the network layer (VPC, Subnets) has already been imported.
+This document specifically covers importing the **legacy compute** layer. By bringing the "Pets" (EC2) under Terraform control in the Services layer, we can manage them alongside the future "Cattle" (ECS Fargate) before decommissioning them.
 
 **Key Themes:**
 
+- **Services Layer:** Managing the application runtime (`infra-services`).
 - **Legacy Management:** Bringing manually created resources under IaC.
-- **Risk Mitigation:** Avoiding disruption by importing existing network components.
-- **Infrastructure as Code:** Establishing the foundation for automated configuration.
+- **Transitional State:** Creates a bridge where EC2 and ECS coexist in the same project structure.
+
+## Conceptual: Legacy EC2 vs. Future ECS Fargate
+
+| Feature      | **Legacy EC2 Instances** (This Step)                                               | **Future ECS Tasks** (Next Phase)                                   |
+| :----------- | :--------------------------------------------------------------------------------- | :------------------------------------------------------------------ |
+| **Location** | `scale.infra-services/environments/...`                                            | `scale.infra-services/modules/ecs-service`                          |
+| **Role**     | **"Pets"**: Long-lived, manually configured servers running the application today. | **"Cattle"**: Ephemeral, auto-scaled containers managed by Fargate. |
+
+_In this step, we are strictly focused on bringing the **Legacy EC2 Instances** under Terraform control so we can safely manage the transition._
 
 ## Prerequisites
 
-- [ ] [Activity 1: Import Network Infrastructure](1-import-existing-infrastructure.md) is complete.
-- [ ] Terraform initialized in `10-application` layer.
-- [ ] List of EC2 Instance IDs, RDS Identifiers, and Security Group IDs from Phase 1 Discovery.
+- [ ] [Activity 1: Import Existing Platform Infrastructure](1-import-existing-infrastructure.md) is complete (VPC, RDS, Security Groups).
+- [ ] Terraform initialized in `scale.infra-services`.
+- [ ] List of EC2 Instance IDs from Phase 1 Discovery.
 
 ---
 
-## Feature 2: Import Application Infrastructure to Terraform
+## Feature 2: Import Legacy Application to Terraform
 
-**Business Value:** Enables disaster recovery and change tracking for critical stateful resources. By importing EC2 and RDS into Terraform (2-3 hours), we prevent manual drift and ensure that the "old world" (EC2) and "new world" (Fargate) can coexist in the same codebase.
+**Business Value:** Enables the Service team to own their legacy infrastructure. Moving EC2 import to the Services layer allows developers to self-service the eventual teardown of these instances.
 
-### Story 2.1: Import Application Resources
+### Story 2.1: Import Legacy EC2 Instances
 
-- Title: Import Existing EC2, RDS, and Security Groups into Terraform State
-- **Persona:** As a **DevOps engineer**, I need to import existing EC2 instances, RDS databases, and security groups into Terraform so that all infrastructure is managed as code in preparation for Fargate migration.
-
-**Business Value:** Brings existing compute and database resources under Terraform management for disaster recovery and change tracking. Application import (2-3 hours) enables team to manage EC2 instances, RDS databases, and security groups as code, preventing manual drift that causes 60% of security incidents and compliance failures.
+- Title: Import Existing EC2 Instances into Infra-Services
+- **Persona:** As a **Service Owner**, I need to import my existing EC2 instances into the services repository so that I can manage my application's infrastructure in one place.
 
 - **Requirements:**
-  - Existing EC2 instances imported into `10-application` layer
-  - Existing RDS databases imported
-  - Existing security groups imported
+  - Existing EC2 instances imported into `scale.infra-services` (Services Layer)
   - `terraform plan` shows no changes (state matches reality)
   - No disruption to running services
+  - Instance configured to use Security Groups from Platform Layer
 
 - **Implementation Details:**
 
-  #### 1) Navigate to Application Layer
+  #### 1) Import EC2 (Compute Layer - Services)
+
+  Navigate to the specific service directory in the **services** repository.
 
   ```bash
-  cd ../10-application
+  # Example: Importing the legacy auth-api instance
+  cd scale.infra-services/environments/dev/us-east-1/auth-api
   ```
 
-  #### 2) Create Terraform Configuration for Existing Resources
-
-  **Create `main.tf`:**
+  Create a `main.tf` file for the EC2 instance.
 
   ```hcl
-  terraform {
-    required_version = ">= 1.7.0"
+  # scale.infra-services/environments/dev/us-east-1/auth-api/main.tf
 
-    backend "s3" {
-      bucket         = "yourcompany-terraform-state-123456789012"
-      key            = "dev/10-application/terraform.tfstate"
-      region         = "us-east-1"
-      dynamodb_table = "terraform-state-lock"
-      encrypt        = true
-    }
-  }
-
-  provider "aws" {
-    region = "us-east-1"
-  }
-
-  # Reference network layer outputs
-  data "terraform_remote_state" "network" {
+  # Data source to read the Security Group from Platform layer
+  data "terraform_remote_state" "platform" {
     backend = "s3"
     config = {
-      bucket = "yourcompany-terraform-state-123456789012"
-      key    = "dev/00-network/terraform.tfstate"
+      bucket = "yourcompany-terraform-state"
+      key    = "dev/platform/00-network/terraform.tfstate" # Point to where SGs are defined
       region = "us-east-1"
     }
   }
 
-  # Import existing security groups
-  resource "aws_security_group" "ec2_app" {
-    name        = "ec2-app-sg"  # Actual name from discovery
-    description = "Security group for EC2 application"
-    vpc_id      = data.terraform_remote_state.network.outputs.vpc_id
-
-    # Add actual ingress/egress rules from Phase 0 discovery
-    ingress {
-      from_port   = 80
-      to_port     = 80
-      protocol    = "tcp"
-      cidr_blocks = ["0.0.0.0/0"]
-    }
-
-    egress {
-      from_port   = 0
-      to_port     = 0
-      protocol    = "-1"
-      cidr_blocks = ["0.0.0.0/0"]
-    }
-
-    tags = {
-      Name = "ec2-app-sg"
-    }
-  }
-
-  resource "aws_security_group" "rds" {
-    name        = "rds-sg"
-    description = "RDS security group"
-    vpc_id      = data.terraform_remote_state.network.outputs.vpc_id
-
-    ingress {
-      from_port       = 5432  # Postgres port
-      to_port         = 5432
-      protocol        = "tcp"
-      security_groups = [aws_security_group.ec2_app.id]
-    }
-
-    tags = {
-      Name = "rds-sg"
-    }
-  }
-
-  # Import existing EC2 instance
   resource "aws_instance" "app_server" {
-    ami           = "ami-0abc123def456"  # Actual AMI from discovery
-    instance_type = "t3.medium"          # Actual instance type
+    ami           = "ami-0c55b159cbfafe1f0" # Replace with actual AMI ID
+    instance_type = "t3.micro"
+    subnet_id     = "subnet-xxxxxxxx"
 
-    subnet_id              = data.terraform_remote_state.network.outputs.private_subnet_ids[0]
-    vpc_security_group_ids = [aws_security_group.ec2_app.id]
+    # Use the Security Group ID from the Platform layer
+    vpc_security_group_ids = [data.terraform_remote_state.platform.outputs.app_sg_id]
 
     tags = {
-      Name = "legacy-app-server"
+      Name = "Legacy-App-Server"
     }
-
-    # Prevent accidental replacement during import
-    lifecycle {
-      ignore_changes = [ami, user_data]
-    }
-  }
-
-  # Import RDS instance
-  resource "aws_db_instance" "main" {
-    identifier     = "app-database"  # Actual DB identifier
-    engine         = "postgres"
-    engine_version = "14.7"          # Actual version from discovery
-    instance_class = "db.t3.medium"  # Actual instance class
-
-    allocated_storage = 100
-    storage_type      = "gp3"
-
-    db_name  = "appdb"
-    username = "dbadmin"
-    password = "PLACEHOLDER"  # Use Secrets Manager; will ignore changes
-
-    vpc_security_group_ids = [aws_security_group.rds.id]
-    db_subnet_group_name   = aws_db_subnet_group.main.name
-
-    backup_retention_period = 7
-    skip_final_snapshot     = false
-    final_snapshot_identifier = "app-database-final-snapshot"
 
     lifecycle {
-      ignore_changes = [password]
-    }
-
-    tags = {
-      Name = "app-database"
-    }
-  }
-
-  resource "aws_db_subnet_group" "main" {
-    name       = "app-db-subnet-group"
-    subnet_ids = data.terraform_remote_state.network.outputs.private_subnet_ids
-
-    tags = {
-      Name = "app-db-subnet-group"
+      ignore_changes = [ami, user_data] # Avoid accidental resets
     }
   }
   ```
 
-  #### 3) Import Application Resources
+  Run the import command using the EC2 Instance ID:
 
   ```bash
-  terraform init
-
-  # Import security groups
-  terraform import aws_security_group.ec2_app sg-0abc111
-  terraform import aws_security_group.rds sg-0abc222
-
-  # Import EC2 instance
-  terraform import aws_instance.app_server i-0abc123def456
-
-  # Import RDS resources
-  terraform import aws_db_subnet_group.main app-db-subnet-group
-  terraform import aws_db_instance.main app-database
-
-  # Verify
-  terraform plan
-  # Should show minimal or no changes
+  terraform import aws_instance.app_server i-0123456789abcdef0
   ```
 
-  #### 4) Handle Common Import Drift
+  #### 2) Verify Import
+
+  Run `terraform plan` to verify the code matches the state. Modify `main.tf` until the plan shows **No Changes**.
+
+  #### 3) Document Import Commands
 
   **Typical issues after import:**
   - **Plan shows tag changes**: Update Terraform to match actual tags

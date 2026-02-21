@@ -1,38 +1,30 @@
-# Activity 1: Import Existing Network Infrastructure
+# Activity 1: Import Existing Platform Infrastructure (Network, RDS, Security Groups)
 
-**Goal:** Bring existing VPC and network foundation under Terraform management to prepare for Fargate.
+**Goal:** Bring existing VPC, network, database, and security foundation under Terraform management (`scale.infra-platform`).
 
 ## Context & Themes
 
-This document details the process of importing legacy resources (VPC, Subnets) into Terraform state. This avoids recreating critical networking components.
+This document details the process of importing legacy resources into the **Platform** Terraform state. This avoids recreating critical components and establishes the "Contract" that the Service layer will consume.
 
 **Key Themes:**
 
-- **Legacy Management:** Bringing manually created resources under IaC.
-- **Risk Mitigation:** Avoiding disruption by importing existing network components.
-- **Infrastructure as Code:** Establishing the foundation for automated configuration.
+- **Platform Layer:** Importing resources that are shared or foundational (`infra-platform`).
+- **Risk Mitigation:** Avoiding disruption by importing existing components "as-is".
+- **Separation of Concerns:** Security Groups and Databases belong to Platform; App compute belongs to Services.
 
 ### Prerequisites
 
 - [ ] Terraform State Bootstrap plan completed.
 - [ ] Platform Repository Setup completed.
 - [ ] Terraform installed and configured locally.
-- [ ] AWS credentials with sufficient permissions (VPC, EC2, IAM read/write).
-- [ ] Access to the AWS Console for ID lookups (VPC IDs, Subnet IDs).
+- [ ] AWS credentials with sufficient permissions.
+- [ ] List of VPC IDs, Subnet IDs, RDS Identifiers, and Security Group IDs from Phase 1 Discovery.
 
 ---
 
-## Feature 1: Import Existing Infrastructure to Terraform
+## Feature 1: Import existing platform Infrastructure to Terraform
 
-**Business Value:** Brings existing production infrastructure under version control and enables safe, tracked changes. Importing existing resources (3-4 hours) prevents manual drift, enables disaster recovery through code, and allows the team to manage both EC2 and Fargate infrastructure in one place. Organizations managing infrastructure manually spend 10-15 hours/month tracking changes across environments; Terraform reduces this to minutes.
-
-We utilize a 3-Repository strategy to separate concerns and minimize blast radius:
-
-1. `infra-terraform-bootstrap` (State Buckets & Locks)
-2. `infra-platform` (Shared networking, ECS Cluster, and other common infrastructure)
-3. `infra-services` (App-specific resources like Task Definitions and Target Groups)
-
-This activity focuses on the `infra-platform` repository.
+**Business Value:** Brings all foundational manufacturing (VPC, Security, Data) under version control. By checking this into `scale.infra-platform`, we create a stable base for the application migration.
 
 ### Story 1.1: Import Network Layer (VPC, Subnets, Routing)
 
@@ -281,32 +273,129 @@ This activity focuses on the `infra-platform` repository.
   terraform import aws_route_table_association.private_1b subnet-0abc444/rtb-0abc222
   ```
 
-  #### 5) Verify Import
+  #### 4) Import Security Groups
+
+  Navigate to `scale.infra-platform` to import Security Groups. Ideally, these live in `00-network` or a dedicated `01-security` directory, depending on your module structure.
+
+  ```bash
+  cd infra-platform/environments/dev/us-east-1/00-network
+  ```
+
+  **Create `security_groups.tf`:**
+
+  ```hcl
+  # Import existing security groups
+  resource "aws_security_group" "ec2_app" {
+    name        = "ec2-app-sg"  # Actual name from discovery
+    description = "Security group for EC2 application"
+    vpc_id      = aws_vpc.main.id
+
+    # Add actual ingress/egress rules from Phase 0 discovery
+    ingress {
+      from_port   = 80
+      to_port     = 80
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
+
+    egress {
+      from_port   = 0
+      to_port     = 0
+      protocol    = "-1"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
+
+    tags = {
+      Name = "ec2-app-sg"
+    }
+  }
+
+  resource "aws_security_group" "rds" {
+    name        = "rds-sg"
+    description = "RDS security group"
+    vpc_id      = aws_vpc.main.id
+
+    ingress {
+      from_port       = 5432  # Postgres port
+      to_port         = 5432
+      protocol        = "tcp"
+      security_groups = [aws_security_group.ec2_app.id]
+    }
+
+    tags = {
+      Name = "rds-sg"
+    }
+  }
+  ```
+
+  Run the import command:
+
+  ```bash
+  terraform import aws_security_group.ec2_app sg-0123456789abcdef0
+  terraform import aws_security_group.rds sg-0987654321fedcba0
+  ```
+
+  #### 5) Import RDS (Database Layer)
+
+  Navigate to the storage directory in the platform repository.
+
+  ```bash
+  cd ../02-storage
+  ```
+
+  Create a `main.tf` file to define the RDS resource you are importing.
+
+  ```hcl
+  # scale.infra-platform/environments/dev/us-east-1/02-storage/main.tf
+
+  # Data source to get VPC/SG info from local remote state or direct reference if inside same module
+  data "terraform_remote_state" "network" {
+    backend = "s3"
+    config = {
+      bucket = "mycompany-terraform-state-dev"
+      key    = "infra-platform/dev/us-east-1/00-network/terraform.tfstate"
+      region = "us-east-1"
+    }
+  }
+
+  resource "aws_db_instance" "main" {
+    # These values must match the existing RDS instance exactly
+    identifier             = "my-existing-db" # Replace with actual DB identifier
+    allocated_storage      = 20
+    storage_type           = "gp2"
+    engine                 = "postgres"
+    engine_version         = "13.7"
+    instance_class         = "db.t3.micro"
+    name                   = "app_production"
+    username               = "admin"
+    password               = "TEMPORARY_PASSWORD_CHANGE_ME" # Will be ignored by lifecycle rule
+    parameter_group_name   = "default.postgres13"
+    skip_final_snapshot    = true
+
+    # Reference the Security Group ID from the network state
+    vpc_security_group_ids = [data.terraform_remote_state.network.outputs.rds_sg_id]
+    db_subnet_group_name   = "default-vpc-xxxx"
+
+    lifecycle {
+      ignore_changes = [password] # Prevent Terraform from resetting password
+    }
+  }
+  ```
+
+  Run the import command:
+
+  ```bash
+  terraform import aws_db_instance.main my-existing-db
+  ```
+
+  #### 6) Verify Import
+
+  Navigate to each directory (`00-network`, `02-storage`) and run:
 
   ```bash
   terraform plan
   # Should show: "No changes. Your infrastructure matches the configuration."
   # If it shows changes, adjust your Terraform code to match AWS reality
-  ```
-
-  #### 6) Iterative Refinement
-
-  **Common drift after import:**
-  - **Plan shows tag differences**: Update Terraform code to match actual tags
-  - **Plan shows minor attribute differences**: Add to `lifecycle { ignore_changes = [...] }` if not important
-  - **Route propagation settings**: Match what's in AWS Console
-
-  **Iterative process:**
-
-  ```bash
-  # 1. Run plan
-  terraform plan
-
-  # 2. If changes shown, either:
-  #    a) Update Terraform code to match AWS reality, OR
-  #    b) Add to ignore_changes if attribute not important
-
-  # 3. Repeat until plan shows zero changes
   ```
 
 - **Acceptance Criteria:**
