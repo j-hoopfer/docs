@@ -41,14 +41,33 @@ Separating platform infrastructure from application services ensures that core n
   cd ~/Projects/infra-platform
   git init
 
-  # Create standard directory structure
-  mkdir -p environments/dev/us-east-1
-  mkdir -p environments/prod/us-east-1
+  # Create layered directory structure for Multi-Account Setup
+  # We use a persistent backend configuration per layer.
+  #
+  # Structure: environments/<account-name>/<region>/<layer>
+  #
+  # Layers organized numerically for clear dependency order:
+  #   00-network: VPC, subnets, routing, security groups (Platform Account)
+  #   01-compute: ECS clusters (Workload Accounts)
+  #   02-storage: ECR repositories, S3 buckets
+  #   03-monitoring: CloudWatch dashboards, alarms
+
+  # Platform/Network Account (Shared Network)
+  mkdir -p environments/network/us-east-1/00-network
+
+  # Workload Accounts (Dev & Prod)
+  mkdir -p environments/dev/us-east-1/{01-compute,02-storage,03-monitoring}
+  mkdir -p environments/prod/us-east-1/{01-compute,02-storage,03-monitoring}
   mkdir -p modules
 
   # Create placeholder files to ensure directories are tracked by Git
-  touch environments/dev/us-east-1/.gitkeep
-  touch environments/prod/us-east-1/.gitkeep
+  touch environments/network/us-east-1/00-network/.gitkeep
+  touch environments/dev/us-east-1/01-compute/.gitkeep
+  touch environments/dev/us-east-1/02-storage/.gitkeep
+  touch environments/dev/us-east-1/03-monitoring/.gitkeep
+  touch environments/prod/us-east-1/01-compute/.gitkeep
+  touch environments/prod/us-east-1/02-storage/.gitkeep
+  touch environments/prod/us-east-1/03-monitoring/.gitkeep
   touch modules/.gitkeep
   ```
 
@@ -204,10 +223,12 @@ Separating platform infrastructure from application services ensures that core n
 
 - **Requirements:**
   - `versions.tf` created with Terraform version constraints.
-  - `main.tf` (or `backend.tf`) configured with S3 backend.
+  - **`backend.tf` configured with S3 backend (separate from main.tf).**
   - `provider.tf` configured with AWS provider.
 
 - **Implementation Details:**
+
+  > **Best Practice:** Use a separate `backend.tf` file inside each layer. This isolates state, reducing blast radius and speeding up plan/apply times.
 
   #### 1) Retrieve State Bucket & Table Names
 
@@ -223,7 +244,7 @@ Separating platform infrastructure from application services ensures that core n
 
   #### 2) Create `versions.tf`
 
-  Create this file in `environments/dev/us-east-1/versions.tf` (and repeat for other environments):
+  Create this file in `environments/network/us-east-1/00-network/versions.tf` (and repeat for other layers):
 
   ```hcl
   terraform {
@@ -238,17 +259,17 @@ Separating platform infrastructure from application services ensures that core n
   }
   ```
 
-  #### 3) Create `main.tf` (Backend Configuration)
+  #### 3) Create `backend.tf` (Backend Configuration)
 
-  Create `environments/dev/us-east-1/main.tf`:
+  Create `environments/network/us-east-1/00-network/backend.tf` (inside the layer):
 
-  _(Note: Replace `YOUR_BUCKET_NAME` and `YOUR_DYNAMODB_TABLE` with the values found above.)_
+  _(Note: Replace `YOUR_BUCKET_NAME` and `YOUR_DYNAMODB_TABLE` with the values found above. Ensure the `key` is unique per layer!)_
 
   ```hcl
   terraform {
     backend "s3" {
       bucket         = "YOUR_BUCKET_NAME"
-      key            = "platform/dev/us-east-1/terraform.tfstate"
+      key            = "platform/network/us-east-1/00-network/terraform.tfstate"
       region         = "us-east-1"
       encrypt        = true
       dynamodb_table = "YOUR_DYNAMODB_TABLE"
@@ -256,19 +277,26 @@ Separating platform infrastructure from application services ensures that core n
   }
   ```
 
+  **Why Layered State?**
+  - **Isolation:** Changes in `00-network` don't risk `01-compute` state.
+  - **Performance:** Smaller state files mean faster Terraform runs.
+  - **Safety:** Limits blast radius if a state file is corrupted.
+
   #### 4) Create `provider.tf`
 
-  Create `environments/dev/us-east-1/provider.tf`:
+  Create `environments/network/us-east-1/00-network/provider.tf` (inside the layer):
 
   ```hcl
   provider "aws" {
     region = "us-east-1"
+    # profile = "scale-network" # Uncomment if using local profiles
 
     default_tags {
       tags = {
-        Environment = "dev"
+        Environment = "network"
         Repository  = "infra-platform"
         ManagedBy   = "Terraform"
+        Layer       = "00-network"
       }
     }
   }

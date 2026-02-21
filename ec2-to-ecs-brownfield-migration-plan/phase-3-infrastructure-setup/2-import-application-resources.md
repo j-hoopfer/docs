@@ -40,39 +40,47 @@ This document specifically covers bringing the **stateful** and **compute** laye
 
 - **Implementation Details:**
 
-  #### 1) Navigate to Application Layer
+  #### 1) Navigate to Application/Compute Layer (Workload Account)
 
   ```bash
-  cd ../10-application
+  cd infra-platform/environments/dev/us-east-1/01-compute
   ```
 
   #### 2) Create Terraform Configuration for Existing Resources
+
+  **Create `backend.tf` (Layer-specific):**
+
+  ```hcl
+  terraform {
+    backend "s3" {
+      bucket         = "yourcompany-terraform-state-123456789012"
+      key            = "platform/dev/us-east-1/01-compute/terraform.tfstate"
+      region         = "us-east-1"
+      dynamodb_table = "terraform-state-lock"
+      encrypt        = true
+    }
+  }
+  ```
 
   **Create `main.tf`:**
 
   ```hcl
   terraform {
     required_version = ">= 1.7.0"
-
-    backend "s3" {
-      bucket         = "yourcompany-terraform-state-123456789012"
-      key            = "dev/10-application/terraform.tfstate"
-      region         = "us-east-1"
-      dynamodb_table = "terraform-state-lock"
-      encrypt        = true
-    }
   }
 
   provider "aws" {
     region = "us-east-1"
+    # profile = "scale-dev"
   }
 
-  # Reference network layer outputs
+  # Reference NETWORK layer outputs (from Network Account/Layer)
   data "terraform_remote_state" "network" {
     backend = "s3"
     config = {
       bucket = "yourcompany-terraform-state-123456789012"
-      key    = "dev/00-network/terraform.tfstate"
+      # Points to the 00-network layer in the network account
+      key    = "platform/network/us-east-1/00-network/terraform.tfstate"
       region = "us-east-1"
     }
   }

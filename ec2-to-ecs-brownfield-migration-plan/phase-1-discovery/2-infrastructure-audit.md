@@ -21,6 +21,28 @@ Understanding the current network topology is critical to prevent deployment fai
 
 **Business Value:** Prevents deployment failures and unplanned costs by validating network requirements upfront. Discovering VPC incompatibilities in Phase 0 (1 day) vs. during deployment (weeks of debugging) saves 2-3 weeks of engineering time and avoids production outages. Proper NAT/VPC Endpoint planning can save $200-500/month in data transfer costs.
 
+### Story 2.0: Identify Resource Ownership (Layered State)
+
+- **Title:** Map Resources to Terraform Layers (Network vs Workload)
+- **Persona:** As a **Cloud Engineer**, I need to split the existing monolithic infrastructure into "Layers" to support our Multi-Account strategy.
+
+**Business Value:** Prevents "Monolith State" issues where a change to an application Security Group accidentally destroys a VPC Subnet.
+
+- **The Separation:**
+  1.  **Network Layer (`00-network` in Network Account):**
+      - VPC, Subnets, Route Tables, Internet Gateways, NAT Gateways, VPC Endpoints.
+  2.  **Compute Layer (`01-compute` in Workload Account):**
+      - Security Groups (Application specific), ALBs, Target Groups, ECS Clusters.
+
+- **Requirements:**
+  - List all existing network resources.
+  - Tag/Mark them as "Network Account" or "Workload Account".
+  - **Critical:** Identify if the current EC2 instances are in a "Shared VPC" (managed centrally) or an "App VPC" (managed by the team).
+
+- **Acceptance Criteria:**
+  - ✅ List of "Network Layer" resources created.
+  - ✅ List of "Workload Layer" resources created.
+
 ### Story 2.1: Audit VPC for Fargate Compatibility
 
 - **Title:** Verify VPC Meets Fargate Networking Requirements

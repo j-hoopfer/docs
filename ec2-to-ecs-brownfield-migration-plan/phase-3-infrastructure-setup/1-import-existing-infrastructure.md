@@ -14,11 +14,13 @@ This document details the process of importing legacy resources (VPC, Subnets) i
 
 ### Prerequisites
 
-- [ ] Terraform State Bootstrap plan completed.
-- [ ] Platform Repository Setup completed.
+- [ ] Terraform State Bootstrap completed (S3 bucket and DynamoDB table exist).
+- [ ] Platform Repository Setup completed with `backend.tf` files ([Phase 0, Story 1.3](../../ec2-to-ecs-brownfield-migration-plan/phase-0-prerequisites/1-platform-repository-setup.md#story-13-configure-terraform-backend-and-providers)).
 - [ ] Terraform installed and configured locally.
 - [ ] AWS credentials with sufficient permissions (VPC, EC2, IAM read/write).
 - [ ] Access to the AWS Console for ID lookups (VPC IDs, Subnet IDs).
+
+**Important:** Phase 0 configured the repository with a **Layered State** approach. This means each account and each layer (`00-network`, `01-compute`) has its own `backend.tf` and state file. This ensures proper isolation between the shared Network account and Workload accounts.
 
 ---
 
@@ -74,240 +76,402 @@ This activity focuses on the `infra-platform` repository.
   5. Add new Fargate resources alongside existing EC2 resources
   6. Eventually migrate traffic and decommission EC2
 
-  #### 1) Navigate to Network Layer (in `infra-platform` repo)
+  #### 1) Navigate to Environment Directory (in `infra-platform` repo)
+
+  For the Shared Network, we work in the `network` account folder.
 
   ```bash
-  cd infra-platform/environments/dev/us-east-1/00-network
+  cd infra-platform/environments/network/us-east-1/00-network
   ```
 
-  #### 2) Create Terraform Configuration for Existing VPC
+  **Expected directory structure from Phase 0:**
 
-  **Create `main.tf` to describe existing VPC:**
-
-  ```hcl
-  terraform {
-    required_version = ">= 1.7.0"
-
-    backend "s3" {
-      bucket         = "mycompany-terraform-state-dev"  # Created by infra-terraform-bootstrap
-      key            = "infra-platform/dev/us-east-1/00-network/terraform.tfstate"
-      region         = "us-east-1"
-      dynamodb_table = "terraform-locks-dev"
-      encrypt        = true
-    }
-  }
-
-  provider "aws" {
-    region = "us-east-1"
-  }
-
-  # Import existing VPC
-  resource "aws_vpc" "existing" {
-    cidr_block           = "10.0.0.0/16"  # Use actual CIDR from Phase 0 discovery
-    enable_dns_hostnames = true
-    enable_dns_support   = true
-
-    tags = {
-      Name = "existing-vpc"  # Use actual tag from discovery
-    }
-  }
-
-  # Import existing public subnets (for ALB)
-  resource "aws_subnet" "public_1a" {
-    vpc_id            = aws_vpc.existing.id
-    cidr_block        = "10.0.1.0/24"  # Actual CIDR from discovery
-    availability_zone = "us-east-1a"
-
-    tags = {
-      Name = "public-subnet-1a"
-    }
-  }
-
-  resource "aws_subnet" "public_1b" {
-    vpc_id            = aws_vpc.existing.id
-    cidr_block        = "10.0.2.0/24"  # Actual CIDR from discovery
-    availability_zone = "us-east-1b"
-
-    tags = {
-      Name = "public-subnet-1b"
-    }
-  }
-
-  # Import existing private subnets (for EC2/Fargate)
-  resource "aws_subnet" "private_1a" {
-    vpc_id            = aws_vpc.existing.id
-    cidr_block        = "10.0.10.0/24"  # Actual CIDR from discovery
-    availability_zone = "us-east-1a"
-
-    tags = {
-      Name = "private-subnet-1a"
-    }
-  }
-
-  resource "aws_subnet" "private_1b" {
-    vpc_id            = aws_vpc.existing.id
-    cidr_block        = "10.0.11.0/24"  # Actual CIDR from discovery
-    availability_zone = "us-east-1b"
-
-    tags = {
-      Name = "private-subnet-1b"
-    }
-  }
-
-  # Import Internet Gateway
-  resource "aws_internet_gateway" "existing" {
-    vpc_id = aws_vpc.existing.id
-
-    tags = {
-      Name = "existing-igw"
-    }
-  }
-
-  # Import NAT Gateway (if exists)
-  resource "aws_eip" "nat" {
-    domain = "vpc"
-
-    tags = {
-      Name = "nat-eip"
-    }
-  }
-
-  resource "aws_nat_gateway" "existing" {
-    allocation_id = aws_eip.nat.id
-    subnet_id     = aws_subnet.public_1a.id
-
-    tags = {
-      Name = "existing-nat"
-    }
-  }
-
-  # Import route tables
-  resource "aws_route_table" "public" {
-    vpc_id = aws_vpc.existing.id
-
-    route {
-      cidr_block = "0.0.0.0/0"
-      gateway_id = aws_internet_gateway.existing.id
-    }
-
-    tags = {
-      Name = "public-rt"
-    }
-  }
-
-  resource "aws_route_table" "private" {
-    vpc_id = aws_vpc.existing.id
-
-    route {
-      cidr_block     = "0.0.0.0/0"
-      nat_gateway_id = aws_nat_gateway.existing.id
-    }
-
-    tags = {
-      Name = "private-rt"
-    }
-  }
-
-  # Route table associations
-  resource "aws_route_table_association" "public_1a" {
-    subnet_id      = aws_subnet.public_1a.id
-    route_table_id = aws_route_table.public.id
-  }
-
-  resource "aws_route_table_association" "public_1b" {
-    subnet_id      = aws_subnet.public_1b.id
-    route_table_id = aws_route_table.public.id
-  }
-
-  resource "aws_route_table_association" "private_1a" {
-    subnet_id      = aws_subnet.private_1a.id
-    route_table_id = aws_route_table.private.id
-  }
-
-  resource "aws_route_table_association" "private_1b" {
-    subnet_id      = aws_subnet.private_1b.id
-    route_table_id = aws_route_table.private.id
-  }
-
-  # Outputs for application layer to consume
-  output "vpc_id" {
-    value = aws_vpc.existing.id
-  }
-
-  output "public_subnet_ids" {
-    value = [aws_subnet.public_1a.id, aws_subnet.public_1b.id]
-  }
-
-  output "private_subnet_ids" {
-    value = [aws_subnet.private_1a.id, aws_subnet.private_1b.id]
-  }
+  ```
+  environments/network/us-east-1/00-network/
+  ├── backend.tf       # Layer-specific S3 backend
+  ├── provider.tf      # Layer-specific AWS provider
+  ├── versions.tf      # Layer-specific versions
+  └── (Resources will be added here: vpc.tf, variables.tf, etc.)
   ```
 
-  #### 3) Initialize Terraform
+  **Note:** Each layer manages its own state. Resources in `01-compute` (Workload Account) will read VPC details from this layer's state using `terraform_remote_state`.
+
+  #### 2) Verify Existing Configuration Files
 
   ```bash
-  terraform init
+  # Verify backend.tf exists inside the layer
+  cat backend.tf
+  # Should show the S3 backend configuration for this specific layer
+
+  # Verify provider.tf exists inside the layer
+  cat provider.tf
+  # Should show the AWS provider with region and default tags for 'network'
   ```
 
-  #### 4) Import VPC Resources
+  #### 3) Gather Resource IDs from AWS
 
-  **Use actual resource IDs from Phase 0 discovery:**
+  **Create a helper script to retrieve all network resource IDs:**
 
   ```bash
-  # Import VPC
-  terraform import aws_vpc.existing vpc-0abc123def456
+  # Create scripts directory
+  mkdir -p scripts
 
-  # Import subnets
-  terraform import aws_subnet.public_1a subnet-0abc111
-  terraform import aws_subnet.public_1b subnet-0abc222
-  terraform import aws_subnet.private_1a subnet-0abc333
-  terraform import aws_subnet.private_1b subnet-0abc444
-
-  # Import Internet Gateway
-  terraform import aws_internet_gateway.existing igw-0abc123
-
-  # Import NAT Gateway resources
-  terraform import aws_eip.nat eipalloc-0abc123
-  terraform import aws_nat_gateway.existing nat-0abc123
-
-  # Import route tables
-  terraform import aws_route_table.public rtb-0abc111
-  terraform import aws_route_table.private rtb-0abc222
-
-  # Import route table associations
-  terraform import aws_route_table_association.public_1a subnet-0abc111/rtb-0abc111
-  terraform import aws_route_table_association.public_1b subnet-0abc222/rtb-0abc111
-  terraform import aws_route_table_association.private_1a subnet-0abc333/rtb-0abc222
-  terraform import aws_route_table_association.private_1b subnet-0abc444/rtb-0abc222
+  # Create the discovery script
+  cat > scripts/get-import-ids.sh << 'EOF'
+  #!/bin/bash
   ```
 
-  #### 5) Verify Import
+# Script to retrieve AWS network resource IDs for Terraform import
 
-  ```bash
-  terraform plan
-  # Should show: "No changes. Your infrastructure matches the configuration."
-  # If it shows changes, adjust your Terraform code to match AWS reality
-  ```
+set -e
 
-  #### 6) Iterative Refinement
+# VPC ID - Get this from AWS Console or use this command first
 
-  **Common drift after import:**
-  - **Plan shows tag differences**: Update Terraform code to match actual tags
-  - **Plan shows minor attribute differences**: Add to `lifecycle { ignore_changes = [...] }` if not important
-  - **Route propagation settings**: Match what's in AWS Console
+echo "Enter your VPC ID (e.g., vpc-0abc123def456):"
+read VPC_ID
 
-  **Iterative process:**
+echo "=== VPC ==="
+aws ec2 describe-vpcs --vpc-ids $VPC_ID \
+ --query 'Vpcs[0].[VpcId,CidrBlock,Tags[?Key==`Name`].Value|[0]]' \
+ --output table
 
-  ```bash
-  # 1. Run plan
-  terraform plan
+echo ""
+echo "=== Subnets ==="
+aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" \
+ --query 'Subnets[].[Tags[?Key==`Name`].Value|[0],SubnetId,CidrBlock,AvailabilityZone]' \
+ --output table
 
-  # 2. If changes shown, either:
-  #    a) Update Terraform code to match AWS reality, OR
-  #    b) Add to ignore_changes if attribute not important
+echo ""
+echo "=== Internet Gateway ==="
+aws ec2 describe-internet-gateways \
+ --filters "Name=attachment.vpc-id,Values=$VPC_ID" \
+ --query 'InternetGateways[0].[InternetGatewayId,Tags[?Key==`Name`].Value|[0]]' \
+ --output table
 
-  # 3. Repeat until plan shows zero changes
-  ```
+echo ""
+echo "=== NAT Gateways ==="
+aws ec2 describe-nat-gateways --filter "Name=vpc-id,Values=$VPC_ID" \
+ --query 'NatGateways[].[NatGatewayId,SubnetId,NatGatewayAddresses[0].AllocationId,Tags[?Key==`Name`].Value|[0]]' \
+ --output table
+
+echo ""
+echo "=== Route Tables ==="
+aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$VPC_ID" \
+ --query 'RouteTables[].[RouteTableId,Tags[?Key==`Name`].Value|[0],Associations[].SubnetId]' \
+ --output table
+
+echo ""
+echo "=== Route Table Associations ==="
+aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$VPC_ID" \
+ --query 'RouteTables[].Associations[].[RouteTableAssociationId,SubnetId,RouteTableId]' \
+ --output table
+EOF
+
+chmod +x scripts/get-import-ids.sh
+
+````
+
+**Run the script to gather all resource IDs:**
+
+```bash
+./scripts/get-import-ids.sh
+````
+
+**Save the output** - you'll use these IDs in the next steps to:
+
+1. Populate the resource definitions in `vpc.tf` (Step 4)
+2. Run the import commands (Step 6)
+
+**Example output:**
+
+```
+=== Subnets ===
+┌────────────────────┬─────────────────────┬──────────────┬──────────────┐
+│ public-subnet-1a   │ subnet-0abc111      │ 10.0.1.0/24  │ us-east-1a   │
+│ public-subnet-1b   │ subnet-0abc222      │ 10.0.2.0/24  │ us-east-1b   │
+│ private-subnet-1a  │ subnet-0abc333      │ 10.0.10.0/24 │ us-east-1a   │
+│ private-subnet-1b  │ subnet-0abc444      │ 10.0.11.0/24 │ us-east-1b   │
+└────────────────────┴─────────────────────┴──────────────┴──────────────┘
+```
+
+**Pro tip:** Save the output to a file for reference:
+
+```bash
+./scripts/get-import-ids.sh > network-ids.txt
+```
+
+#### 4) Create Network Resource Definitions
+
+**Create `us-east-1/00-network/vpc.tf` using the IDs from Step 3:**
+
+Replace the example values below with actual values from your `get-import-ids.sh` output.
+
+```hcl
+# Import existing VPC
+resource "aws_vpc" "existing" {
+  cidr_block           = "10.0.0.0/16"  # Use actual CIDR from Phase 0 discovery
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+
+  tags = {
+    Name = "existing-vpc"  # Use actual tag from discovery
+  }
+}
+
+# Import existing public subnets (for ALB)
+resource "aws_subnet" "public_1a" {
+  vpc_id            = aws_vpc.existing.id
+  cidr_block        = "10.0.1.0/24"  # Actual CIDR from discovery
+  availability_zone = "us-east-1a"
+
+  tags = {
+    Name = "public-subnet-1a"
+  }
+}
+
+resource "aws_subnet" "public_1b" {
+  vpc_id            = aws_vpc.existing.id
+  cidr_block        = "10.0.2.0/24"  # Actual CIDR from discovery
+  availability_zone = "us-east-1b"
+
+  tags = {
+    Name = "public-subnet-1b"
+  }
+}
+
+# Import existing private subnets (for EC2/Fargate)
+resource "aws_subnet" "private_1a" {
+  vpc_id            = aws_vpc.existing.id
+  cidr_block        = "10.0.10.0/24"  # Actual CIDR from discovery
+  availability_zone = "us-east-1a"
+
+  tags = {
+    Name = "private-subnet-1a"
+  }
+}
+
+resource "aws_subnet" "private_1b" {
+  vpc_id            = aws_vpc.existing.id
+  cidr_block        = "10.0.11.0/24"  # Actual CIDR from discovery
+  availability_zone = "us-east-1b"
+
+  tags = {
+    Name = "private-subnet-1b"
+  }
+}
+
+# Import Internet Gateway
+resource "aws_internet_gateway" "existing" {
+  vpc_id = aws_vpc.existing.id
+
+  tags = {
+    Name = "existing-igw"
+  }
+}
+
+# Import NAT Gateway (if exists)
+resource "aws_eip" "nat" {
+  domain = "vpc"
+
+  tags = {
+    Name = "nat-eip"
+  }
+}
+
+resource "aws_nat_gateway" "existing" {
+  allocation_id = aws_eip.nat.id
+  subnet_id     = aws_subnet.public_1a.id
+
+  tags = {
+    Name = "existing-nat"
+  }
+}
+
+# Import route tables
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.existing.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.existing.id
+  }
+
+  tags = {
+    Name = "public-rt"
+  }
+}
+
+resource "aws_route_table" "private" {
+  vpc_id = aws_vpc.existing.id
+
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.existing.id
+  }
+
+  tags = {
+    Name = "private-rt"
+  }
+}
+
+# Route table associations
+resource "aws_route_table_association" "public_1a" {
+  subnet_id      = aws_subnet.public_1a.id
+  route_table_id = aws_route_table.public.id
+}
+
+resource "aws_route_table_association" "public_1b" {
+  subnet_id      = aws_subnet.public_1b.id
+  route_table_id = aws_route_table.public.id
+}
+
+resource "aws_route_table_association" "private_1a" {
+  subnet_id      = aws_subnet.private_1a.id
+  route_table_id = aws_route_table.private.id
+}
+
+resource "aws_route_table_association" "private_1b" {
+  subnet_id      = aws_subnet.private_1b.id
+  route_table_id = aws_route_table.private.id
+}
+```
+
+**Create `us-east-1/00-network/outputs.tf` for downstream consumption:**
+
+```hcl
+# Outputs for application layer to consume
+output "vpc_id" {
+  description = "ID of the VPC"
+  value       = aws_vpc.existing.id
+}
+
+output "public_subnet_ids" {
+  description = "IDs of public subnets (for ALB)"
+  value       = [aws_subnet.public_1a.id, aws_subnet.public_1b.id]
+}
+
+output "private_subnet_ids" {
+  description = "IDs of private subnets (for ECS tasks)"
+  value       = [aws_subnet.private_1a.id, aws_subnet.private_1b.id]
+}
+```
+
+**Resulting file structure:**
+
+```
+environments/dev/
+├── backend.tf          # Backend (from Phase 0)
+├── provider.tf         # Provider (from Phase 0)
+├── versions.tf         # Versions (from Phase 0)
+├── us-east-1/
+│   ├── 00-network/
+│   │   ├── vpc.tf      # VPC and network resources (NEW)
+│   │   └── outputs.tf  # Output values (NEW)
+│   ├── 01-compute/
+│   ├── 02-storage/
+│   └── 03-monitoring/
+└── us-west-2/
+```
+
+**Important:** Since we're using a single state file per environment, all layers (00-network, 01-compute, etc.) and all regions (us-east-1, us-west-2) are managed together in one Terraform run. The `backend.tf`, `provider.tf`, and `versions.tf` files at the `environments/dev/` level are shared across all layers and regions.
+
+#### 5) Initialize Terraform
+
+```bash
+# Run from the environment directory
+# You should be in: infra-platform/environments/dev/
+terraform init
+```
+
+This initializes the backend and downloads providers for the entire environment (all layers and all regions together).
+
+#### 6) Import VPC Resources
+
+**Use the actual resource IDs from Step 3 (get-import-ids.sh output):**
+
+```bash
+# Import VPC
+terraform import aws_vpc.existing vpc-0abc123def456
+
+# Import subnets
+terraform import aws_subnet.public_1a subnet-0abc111
+terraform import aws_subnet.public_1b subnet-0abc222
+terraform import aws_subnet.private_1a subnet-0abc333
+terraform import aws_subnet.private_1b subnet-0abc444
+
+# Import Internet Gateway
+terraform import aws_internet_gateway.existing igw-0abc123
+
+# Import NAT Gateway resources
+terraform import aws_eip.nat eipalloc-0abc123
+terraform import aws_nat_gateway.existing nat-0abc123
+
+# Import route tables
+terraform import aws_route_table.public rtb-0abc111
+terraform import aws_route_table.private rtb-0abc222
+
+# Import route table associations
+terraform import aws_route_table_association.public_1a subnet-0abc111/rtb-0abc111
+terraform import aws_route_table_association.public_1b subnet-0abc222/rtb-0abc111
+terraform import aws_route_table_association.private_1a subnet-0abc333/rtb-0abc222
+terraform import aws_route_table_association.private_1b subnet-0abc444/rtb-0abc222
+```
+
+**Pro tip:** Create an import script to avoid copy-paste errors:
+
+```bash
+cat > scripts/import-network.sh << 'EOF'
+#!/bin/bash
+# Paste your actual resource IDs here from get-import-ids.sh output
+
+terraform import aws_vpc.existing vpc-0abc123def456
+terrafo8m import aws_subnet.public_1a subnet-0abc111
+terraform import aws_subnet.public_1b subnet-0abc222
+terraform import aws_subnet.private_1a subnet-0abc333
+terraform import aws_subnet.private_1b subnet-0abc444
+terraform import aws_internet_gateway.existing igw-0abc123
+terraform import aws_eip.nat eipalloc-0abc123
+terraform import aws_nat_gateway.existing nat-0abc123
+terraform import aws_route_table.public rtb-0abc111
+terraform import aws_route_table.private rtb-0abc222
+terraform import aws_route_table_association.public_1a subnet-0abc111/rtb-0abc111
+terraform import aws_route_table_association.public_1b subnet-0abc222/rtb-0abc111
+terraform import aws_route_table_association.private_1a subnet-0abc333/rtb-0abc222
+terraform import aws_route_table_association.private_1b subnet-0abc444/rtb-0abc222
+EOF
+
+chmod +x scripts/import-network.sh
+./scripts/import-network.sh
+```
+
+#### 7) Verify Import
+
+```bash
+terraform plan
+# Should show: "No changes. Your infrastructure matches the configuration."
+# If it shows changes, adjust your Terraform code to match AWS reality
+```
+
+#### 7) Iterative Refinement
+
+**Common drift after import:**
+
+- **Plan shows tag differences**: Update Terraform code to match actual tags
+- **Plan shows minor attribute differences**: Add to `lifecycle { ignore_changes = [...] }` if not important
+- **Route propagation settings**: Match what's in AWS Console
+
+**Iterative process:**
+
+```bash
+# 1. Run plan
+terraform plan
+
+# 2. If changes shown, either:
+#    a) Update Terraform code to match AWS reality, OR
+#    b) Add to ignore_changes if attribute not important
+
+# 3. Repeat until plan shows zero changes
+```
 
 - **Acceptance Criteria:**
   - ✅ All existing network resources imported into `00-network` Terraform state

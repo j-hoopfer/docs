@@ -21,7 +21,10 @@ Before starting this phase, ensure:
 - [ ] Terraform installed and authenticated with AWS (local or CI/CD).
 - [ ] **IaC Linting tools (TFLint, Checkov) configured in repository.**
 - [ ] AWS Administrator access for creating IAM roles, VPC resources, and Load Balancers.
-- [ ] Terraform State bucket and DynamoDB table created (from "Terraform State Bootstrap" phase).
+- [ ] Terraform State bucket and DynamoDB table created (from [Terraform State Bootstrap](../../terraform-state-bootstrap-plan/3-bootstrap-dev.md)).
+- [ ] **Repository structures with backend.tf files created** (from [Phase 0, Platform Setup](../phase-0-prerequisites/1-platform-repository-setup.md) and [Services Setup](../phase-0-prerequisites/2-services-repository-setup.md)).
+
+**Note:** The backend configuration (`backend.tf`) in each layer should already exist from Phase 0. You will add the infrastructure code (`main.tf`, `variables.tf`, etc.) in this phase.
 
 ## Overview
 

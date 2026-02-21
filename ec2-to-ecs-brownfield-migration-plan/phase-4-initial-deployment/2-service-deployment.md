@@ -36,15 +36,18 @@ This is the core deployment unit. A running Fargate Task Definition behind a Tar
   - Health check path must return 200 status code
 
 - **Implementation Details:**
+  - **Account Context:** Workload Account (`dev` / `prod`).
+  - **Shared VPC Note:** If using a separate Network Account, ensure the VPC and Private Subnets are shared with this account via AWS Resource Access Manager (RAM). The VPC will appear in the dropdown as a "Shared VPC".
   - **Via AWS Console:**
-    1. Go to **EC2 → Target Groups → Create target group**
-    2. Choose target type: **IP addresses** ⚠️ (Critical - not "Instances")
-    3. Configure:
+    1. Log into **Workload Account**.
+    2. Go to **EC2 → Target Groups → Create target group**
+    3. Choose target type: **IP addresses** ⚠️ (Critical - not "Instances")
+    4. Configure:
        - Name: `auth-api-tg` (or `test-api-1-tg`, etc.)
        - Protocol: HTTP
        - Port: 3000 (your container port - Check your Dockerfile's `EXPOSE` instruction from Phase 2)
-       - VPC: Select your Fargate VPC
-    4. Health checks:
+       - VPC: Select your **Shared Fargate VPC** (from Network Account)
+    5. Health checks:
        - Protocol: HTTP
        - Path: `/health`
        - Port: traffic port
@@ -53,16 +56,17 @@ This is the core deployment unit. A running Fargate Task Definition behind a Tar
        - Timeout: 5 seconds
        - Interval: 30 seconds
        - Success codes: 200
-    5. Click **Next**
-    6. **Skip** registering targets (ECS will do this automatically)
-    7. Click **Create target group**
+    6. Click **Next**
+    7. **Skip** registering targets (ECS will do this automatically)
+    8. Click **Create target group**
   - **Via AWS CLI:**
     ```bash
+    # Ensure you are using Workload Account credentials
     aws elbv2 create-target-group \
       --name auth-api-tg \
       --protocol HTTP \
       --port 3000 \ # Check your Dockerfile's EXPOSE instruction
-      --vpc-id vpc-xxxxx \
+      --vpc-id vpc-xxxxx \ # ID of Shared VPC
       --target-type ip \
       --health-check-protocol HTTP \
       --health-check-path /health \
