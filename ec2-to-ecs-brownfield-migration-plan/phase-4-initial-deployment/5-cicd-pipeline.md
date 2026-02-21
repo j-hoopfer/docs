@@ -30,6 +30,7 @@ Before building the pipeline, ensure:
 ### Story 5.1: IAM Role & OIDC
 
 - **Title:** Configure AWS OIDC for GitHub Actions
+- **Target Account:** Workload Account (`dev` / `prod`)
 - **Persona:** As a **Security Engineer**, I want to provide secure, temporary access for GitHub Actions so that we don't need to manage static IAM user credentials.
 
 **(Junior Engineer Context: If `aws-actions` fails with `sts:AssumeRoleWithWebIdentity`, check that your IAM Trust Policy `sub` claim matches your repo/branch exactly, and that your YAML workflow includes `permissions: id-token: write`.)**
@@ -37,13 +38,15 @@ Before building the pipeline, ensure:
 **Business Value:** Secures pipeline access to AWS resources without permanent credentials, eliminating key rotation overhead. OIDC integration (15-20 minutes) provides secure, auditable, and temporary access for GitHub Actions workflows. Following security best practices (least privilege) protects infrastructure from compromised CI credentials. Setup required once per repository/account.
 
 - **Requirements:**
-  - Create OIDC Identity Provider in AWS IAM
+  - Create OIDC Identity Provider in AWS IAM (in the Workload Account)
   - Create IAM Role referencing provider
   - Trust policy allows GitHub repo
   - Role has necessary permissions (Push ECR, Deploy ECS)
 
 - **Implementation Details:**
   1. **Create Identity Provider:**
+     - Log into the **Workload Account**.
+     - Go to IAM -> Identity Providers.
      - Type: **OpenID Connect**
      - Provider URL: `https://token.actions.githubusercontent.com`
      - Audience: `sts.amazonaws.com`
@@ -58,7 +61,7 @@ Before building the pipeline, ensure:
            {
              "Effect": "Allow",
              "Principal": {
-               "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com"
+               "Federated": "arn:aws:iam::<WORKLOAD_ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com"
              },
              "Action": "sts:AssumeRoleWithWebIdentity",
              "Condition": {

@@ -71,6 +71,8 @@ Per AWS Account (in primary region):
 
 | Account | Purpose              | State Bucket Name                | Lock Table Name        |
 | ------- | -------------------- | -------------------------------- | ---------------------- |
+| Mgmt    | Organizations/SSO    | `mycompany-terraform-state-mgmt` | `terraform-locks-mgmt` |
+| Network | Shared VPC/TGW/VPN   | `mycompany-terraform-state-net`  | `terraform-locks-net`  |
 | Dev     | Development/Testing  | `mycompany-terraform-state-dev`  | `terraform-locks-dev`  |
 | Prod    | Production/Workloads | `mycompany-terraform-state-prod` | `terraform-locks-prod` |
 

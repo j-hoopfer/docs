@@ -27,15 +27,21 @@ This repository acts as a **Meta-plan** (Plan of Plans). It coordinates multiple
 
 ---
 
-## Plan Architecture
+## Migration Strategy: Multi-Account Architecture
 
-This migration plan **references and coordinates** specialized plans for different aspects of the migration:
+This migration leverages a **Multi-Account AWS Organization** strategy to enhance security, isolation, and scalability.
+
+- **Management Account:** AWS Organizations, consolidated billing, and SSO (Identity Center).
+- **Network/Platform Account:** Shared networking (VPC, Transit Gateway), shared services, and CI/CD pipelines.
+- **Workload Accounts (Dev/Prod):** Dedicated accounts for application workloads (ECS Clusters, Services, Tasks).
+
+This separation ensures that application deployments in `dev` or `prod` do not impact the core networking infrastructure.
 
 ### 📋 Referenced Plans
 
 1. **[Terraform State Bootstrap Plan](../terraform-state-bootstrap-plan/README.md)**
    - Covered in: Phase 0
-   - Sets up Terraform state backend (S3 + DynamoDB)
+   - Sets up Terraform state backend (S3 + DynamoDB) per account/layer
    - Enables team collaboration on infrastructure code
    - **Note:** This is a separate project with its own Phases (0-8). Complete at least Phases 0-5 of the Bootstrap Plan before proceeding to Phase 2 (Infrastructure Setup) of this migration.
 

@@ -70,74 +70,75 @@
   aws configure sso
   ```
 
-  You'll be prompted for:
+  You will need to run this **once for each account** (Network, Dev, Prod) to set up separate profiles.
+
+  **First Run (Network Account):**
 
   ```
   SSO session name (Recommended): fargate-migration
   SSO start URL [None]: https://d-abc123xyz.awsapps.com/start
   SSO region [None]: us-east-1
-  SSO registration scopes [sso:account:access]:  [press Enter]
+  SSO registration scopes [sso:account:access]: [Enter]
   ```
 
-  Browser will open → Log in with your IAM Identity Center credentials → Approve access
-
-  Back in terminal:
+  _Browser auth..._
 
   ```
-  There are N AWS accounts available to you.
-  > YourAccountName, your-email@company.com (123456789012)
+  Select Account: Network-Account
+  Select Role: NetworkAdmin
+  CLI default client Region: us-east-1
+  CLI default output format: json
+  CLI profile name: network-admin
+  ```
 
-  Using the account ID 123456789012
-  There are N role(s) available to you.
-  > AdministratorAccess
+  **Second Run (Dev Account):**
 
-  CLI default client Region [None]: us-east-1
-  CLI default output format [None]: json
-  CLI profile name [AdministratorAccess-123456789012]: fargate-migration
+  ```
+  aws configure sso
+  ...
+  Select Account: Dev-Account
+  Select Role: AdministratorAccess
+  CLI profile name: dev-admin
   ```
 
   #### 3) Test SSO Login
 
   ```bash
-  aws sso login --profile fargate-migration
+  # Logging into the session authorizes ALL profiles in that session
+  aws sso login --profile network-admin
 
-  # Verify identity
-  aws sts get-caller-identity --profile fargate-migration
+  # Verify identity for Network
+  aws sts get-caller-identity --profile network-admin
+
+  # Verify identity for Dev
+  aws sts get-caller-identity --profile dev-admin
   ```
 
-  Expected output:
-
-  ```json
-  {
-    "UserId": "AROA...:your-email@company.com",
-    "Account": "123456789012",
-    "Arn": "arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_AdministratorAccess_.../your-email@company.com"
-  }
-  ```
+  Expected output shows distinct Account IDs for each profile.
 
   #### 4) Set Default Profile (Optional)
 
-  To avoid typing `--profile` on every command:
+  To avoid typing `--profile` on every command (defaults to Dev):
 
   ```bash
-  export AWS_PROFILE=fargate-migration
+  export AWS_PROFILE=dev-admin
 
   # Add to ~/.zshrc or ~/.bashrc to persist
-  echo 'export AWS_PROFILE=fargate-migration' >> ~/.zshrc
+  echo 'export AWS_PROFILE=dev-admin' >> ~/.zshrc
   source ~/.zshrc
   ```
 
   #### 5) SSO Session Management
   - **SSO tokens expire after 8 hours** (by default)
-  - When expired, run: `aws sso login --profile fargate-migration`
+  - When expired, run: `aws sso login --profile dev-admin`
   - Browser will open again for re-authentication
 
 - **Acceptance Criteria:**
   - ✅ `aws --version` shows version 2.x.x
-  - ✅ `aws configure sso` completed successfully
-  - ✅ `aws sso login --profile fargate-migration` opens browser and completes auth
-  - ✅ `aws sts get-caller-identity --profile fargate-migration` returns account details
-  - ✅ Team members can run AWS CLI commands
+  - ✅ `aws configure sso` completed for **Network, Dev, and Prod** profiles
+  - ✅ `aws sso login` works for all profiles
+  - ✅ `aws sts get-caller-identity` returns correct Account IDs for `network-admin` vs `dev-admin`
+  - ✅ Team members can run AWS CLI commands against correct accounts
 
 ---
 
@@ -545,7 +546,7 @@
 
   ```bash
   brew install tflint
-  
+
   # Verify
   tflint --version
   ```
@@ -555,18 +556,18 @@
   ```bash
   # Download
   curl -L "$(curl -s https://api.github.com/repos/terraform-linters/tflint/releases/latest | grep -o -E "https://.+?_$(uname -s | tr '[:upper:]' '[:lower:]')_amd64.zip")" -o tflint.zip
-  
+
   # Install
   unzip tflint.zip
   sudo mv tflint /usr/local/bin/
   rm tflint.zip
-  
+
   # Verify
   tflint --version
   ```
 
   **Windows (Chocolatey):**
-  
+
   ```powershell
   choco install tflint
   ```
@@ -577,7 +578,7 @@
 
   ```bash
   brew install tfsec
-  
+
   # Verify
   tfsec --version
   ```

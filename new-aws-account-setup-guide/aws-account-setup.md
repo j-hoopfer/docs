@@ -20,6 +20,15 @@
 
 - **Implementation Details:**
 
+  #### 0) Pre-requisite: Define Multi-Account Structure
+
+  Before creating accounts, understand the target structure:
+  - **Management Account:** Billing, Identity Center (SSO), Organizations Root.
+  - **Network Account:** Shared VPCs, Transit Gateways, VPNs.
+  - **Workload Accounts:**
+    - **Dev:** Development/Staging workloads.
+    - **Prod:** Production workloads.
+
   #### 1) Secure Root User (Critical First Step)
   - Log in to AWS Console as Root user
   - Navigate to: IAM → Security Credentials

@@ -27,6 +27,7 @@ A properly segmented network and centralized artifacts are critical for security
 ### Story 3.1: VPC and Subnet Provisioning
 
 - **Title:** Provision VPC with Public and Private Subnets
+- **Target Layer:** `environments/network/us-east-1/00-network` (Network Account)
 - **Persona:** As a **Cloud Engineer**, I want to provision a VPC with distinct Public and Private subnets so that my load balancers are accessible to the internet while my application containers remain hidden for security.
 
 **Business Value:** Creates the security foundation required for production deployments and compliance certifications. Multi-AZ VPC with public/private subnets (4-6 hours setup) prevents direct container internet access (required for PCI/SOC 2), enables zero-downtime deployments (containers can restart in alternate AZ), and provides IP address space for 100+ services. One company reduced security audit findings from 12 to 0 after implementing proper network segmentation via public/private subnets.
@@ -42,7 +43,7 @@ A properly segmented network and centralized artifacts are critical for security
     - CIDR: `10.100.0.0/20` (4,096 IPs total)
     - `enableDnsHostnames: true`
     - `enableDnsSupport: true`
-    - Tags: `Name: fargate-migration-vpc`, `Environment: production`
+    - Tags: `Name: fargate-migration-vpc`, `Environment: network`
   - **Public Subnets (x2)** — Used for ALB and NAT Gateways:
     - Public A (`us-east-1a`): `10.100.0.0/23` (512 IPs)
     - Public B (`us-east-1b`): `10.100.2.0/23` (512 IPs)
@@ -75,6 +76,7 @@ A properly segmented network and centralized artifacts are critical for security
 ### Story 3.2: Cost-Optimized Connectivity (NAT & VPC Endpoints)
 
 - **Title:** Configure NAT Gateways and VPC Endpoints
+- **Target Layer:** `environments/network/us-east-1/00-network` (Network Account)
 - **Persona:** As a **FinOps Stakeholder**, I want to optimize traffic costs for AWS services so that we don't pay NAT Gateway processing fees for internal AWS service traffic.
 
 **Business Value:** Delivers $200-500/month cost savings through VPC endpoints while maintaining private subnet internet access. S3 Gateway Endpoint (free, 1-hour setup) eliminates NAT charges for ECR traffic (image pulls), which can represent 60-80% of NAT data transfer costs. VPC endpoints also reduce latency by 30-50ms by keeping AWS service traffic within AWS backbone instead of routing through NAT Gateway and public internet. Critical for cost-efficient scaling beyond 5-10 containers.
@@ -86,8 +88,8 @@ A properly segmented network and centralized artifacts are critical for security
 
 - **Implementation Details:**
   - **NAT Gateways:**
-    - Production: 2 NAT Gateways (one per AZ) for high availability
-    - Dev/Cost-Saving: 1 NAT Gateway (single point of failure, but ~$32/month savings)
+    - **Architecture Decision:** Use Per-AZ NAT Gateways for High Availability (One per Private Subnet).
+    - Production: 2 NAT Gateways (one per AZ)
     - Place in Public Subnets
     - Allocate Elastic IP for each NAT Gateway
     - Cost: ~$32/month per NAT + $0.045/GB processed
@@ -111,6 +113,8 @@ A properly segmented network and centralized artifacts are critical for security
 ### Story 3.3: Application Load Balancer (ALB)
 
 - **Title:** Provision Shared Internet-Facing Load Balancer
+- **Target Layer:** `environments/dev/us-east-1/01-compute` (Workload Account)
+- **Note:** This resource lives in the **Workload Account** but must reference subnets from the **Network Account** (via `terraform_remote_state` or data sources).
 - **Persona:** As a **System Architect**, I want a single Internet-Facing Load Balancer so that I can route traffic to multiple services using a single entry point and SSL certificate.
 
 **Business Value:** Provides single internet entry point for all services, reducing costs and operational complexity. One shared ALB ($16/month + $0.008/LCU-hour) serves unlimited applications via host/path routing vs. dedicated ALB per app ($16-50/month each). For 10 apps, this saves $144-484/month. Also provides centralized TLS termination (one certificate), unified access logs for security audits, and single firewall egress point for IP whitelisting. Essential for multi-service architectures and cost optimization.
@@ -126,8 +130,9 @@ A properly segmented network and centralized artifacts are critical for security
     - Name: `fargate-shared-alb`
     - Scheme: Internet-facing
     - IP Address Type: IPv4 (or dualstack if IPv6 needed)
-    - Subnets: Both Public Subnets
-    - Tags: `Environment: production`
+    - Subnets: Both Public Subnets (Imported from Network Layer)
+    - Tags: `Environment: dev`
+
   - **Security Group (`alb-sg`):**
     - Inbound Rules:
       - Port 80 (HTTP) from `0.0.0.0/0` — for redirect

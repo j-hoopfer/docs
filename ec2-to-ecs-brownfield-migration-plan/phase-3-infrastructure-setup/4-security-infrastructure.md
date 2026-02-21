@@ -27,6 +27,7 @@ Security Groups are the primary firewall for your containers. By creating them u
 ### Story 4.1: Create Application Security Groups
 
 - **Title:** Create Per-Application Security Groups for Fargate Tasks
+- **Target Layer:** `environments/dev/us-east-1/01-compute` (Workload Account) or `infra-services`
 - **Persona:** As a **Security Engineer**, I want to create application security groups upfront so that they're ready when we deploy services in Phase 3.
 
 **Business Value:** Establishes least-privilege network access preventing unauthorized connections to containers. Security group chaining (30 minutes per app) ensures only ALB traffic reaches containers, preventing 90% of lateral movement attacks in cloud breaches. Creating all SGs upfront (batch 2-3 hours for 10 apps) enables parallel deployment work and prevents Phase 3 deployment delays. Free to create, only costs when attached to resources.
@@ -38,12 +39,13 @@ Security Groups are the primary firewall for your containers. By creating them u
   - Decision from Phase 0 audit implemented (reuse vs. create new)
 
 - **Implementation Details:**
+  - **Account Context:** These Security Groups live in the **Workload Account** (e.g., `scale-dev`).
   - **Based on Phase 0 Discovery:**
     - If reusing existing EC2 SG: Add ALB inbound rule to existing SG
     - If creating new: Create Fargate-specific SG
   - **New Security Group Configuration (if creating):**
     - Name: `[app-name]-fargate-sg` (e.g., `auth-api-fargate-sg`)
-    - VPC: Select the Fargate VPC
+    - VPC: Select the ID of the shared VPC (imported from Network Account)
     - Description: "Security group for [app-name] Fargate tasks"
   - **Inbound Rules:**
     | Type | Port | Source | Description |

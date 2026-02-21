@@ -18,7 +18,11 @@ Previous documentation incorrectly implied:
 **Reality:**
 
 - ONE Identity Center instance in the AWS Organization Management Account
-- Identity Center manages SSO access to ALL accounts (Dev: 471112975126, Prod: 637423317953, etc.)
+- Identity Center manages SSO access to ALL accounts:
+  - **Management** (Billing/SSO)
+  - **Network** (VPC/TGW)
+  - **Dev** (Workloads)
+  - **Prod** (Workloads)
 - ONE Terraform backend in the Management Account
 - ONE `backend.hcl` configuration file
 - ALL changes affect production (no separate test instance)
@@ -29,12 +33,15 @@ Previous documentation incorrectly implied:
 AWS Organization
 ├── Management Account (MGMT-ACCT-ID)
 │   ├── Identity Center Instance ← GLOBAL (only one)
+│   │   ├── Manages SSO to Network Account
 │   │   ├── Manages SSO to Dev Account
-│   │   ├── Manages SSO to Prod Account
-│   │   └── Manages SSO to all other accounts
+│   │   └── Manages SSO to Prod Account
 │   │
 │   ├── S3: terraform-state-identity-center-MGMT-ACCT-ID
 │   └── DynamoDB: terraform-state-locks
+│
+├── Network Account (NET-ACCT-ID)
+│   └── Receives SSO access from Identity Center (NetworkAdmin)
 │
 ├── Dev Account (471112975126)
 │   └── Receives SSO access from Identity Center

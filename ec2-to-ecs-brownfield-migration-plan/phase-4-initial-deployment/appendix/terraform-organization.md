@@ -59,6 +59,56 @@ terraform {
 **Workspace vs Directory:**
 We recommend **Directory separation** (dev/stage/prod folders) over Terraform Workspaces for better clarity and variable management.
 
+### State Organization: Per-Layer vs Single State
+
+There are two valid approaches to organizing state files within an environment:
+
+#### Option A: Per-Layer State Files (Granular Isolation)
+
+```
+environments/prod/us-east-1/
+├── 00-network/
+│   ├── backend.tf    # Separate state file
+│   ├── vpc.tf
+├── 01-compute/
+│   ├── backend.tf    # Separate state file
+│   └── ecs.tf
+```
+
+**Tradeoffs:**
+
+- ✅ Granular blast radius (network changes don't affect compute state)
+- ✅ Layers can be modified independently
+- ✅ Better for large teams (lock only what you're changing)
+- ⚠️ More state files to manage
+- ⚠️ Need data sources to reference outputs between layers
+
+#### Option B: Single State Per Environment (Unified Simplicity)
+
+```
+environments/prod/us-east-1/
+├── backend.tf       # Single state for all layers
+├── provider.tf
+├── 00-network/
+│   └── vpc.tf       # Just resources
+├── 01-compute/
+│   └── ecs.tf       # Just resources
+```
+
+**Tradeoffs:**
+
+- ✅ Simpler - one state file per environment
+- ✅ Easier cross-layer references (no data sources needed)
+- ✅ Fewer backend.tf files to maintain
+- ⚠️ Everything locks together (can't modify layers independently)
+- ⚠️ Larger blast radius
+
+**Recommendation:**
+
+- **Small teams (< 5)** or **Dev environments**: Use single state (Option B)
+- **Large teams** or **Production**: Use per-layer state (Option A)
+- See [Backend.tf Best Practices](../../phase-0-prerequisites/appendix/backend-tf-best-practices.md#state-organization-strategies) for detailed comparison
+
 ---
 
 ## 4. Module Versioning

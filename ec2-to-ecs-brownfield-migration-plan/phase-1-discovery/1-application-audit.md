@@ -98,6 +98,28 @@ Before starting this audit, ensure:
   - ✅ **Cron jobs verified as stateless or refactored to use external state (S3/DynamoDB/RDS)**
   - ✅ **Cron jobs tested to run successfully multiple times without side effects**
   - ✅ All open ports documented
+
+### Story 1.3: Document Hosting Account Strategy
+
+- **Title:** Identify Target Account for Application
+- **Persona:** As an **Architect**, I need to determine which AWS Account and Terraform Layer this application belongs to so that it lands in the correct environment.
+
+**Business Value:** Ensures strict separation of duties. "Shared Services" or "Network" resources must not accidentally end up in a "Workload" account, and vice versa.
+
+- **Context:**
+  - **Network Account (`00-network`):** Shared VPCs, Transit Gateways, VPNs, NAT Gateways.
+  - **Workload Accounts (`01-compute`):** The Application itself (ECS Tasks), Application Load Balancers (ALBs), RDS Databases.
+
+- **Requirements:**
+  - Identify current AWS Account ID.
+  - Determine Target AWS Account ID (Dev vs Prod Workload Account).
+  - Verify if the application owns any "infrastructure" components (like a VPC peering connection) that should actually move to the Network Account.
+
+- **Acceptance Criteria:**
+  - ✅ Current Account ID documented.
+  - ✅ Target Workload Account ID documented.
+  - ✅ Confirmed that application does not contain "Network Layer" resources (moved to Story 2.2 if found).
+
   - ✅ Local data directories identified and migration plan created
 
 ### Story 1.3: Audit Current Logging Setup and Consumers

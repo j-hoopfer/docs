@@ -229,7 +229,7 @@ Decoupling application lifecycles from platform lifecycles allows developers to 
 
 - **Requirements:**
   - `versions.tf` created with Terraform version constraints.
-  - `main.tf` (or `backend.tf`) configured with S3 backend.
+  - **`backend.tf` configured with S3 backend (separate from main.tf).**
   - `provider.tf` configured with AWS provider.
 
 - **Implementation Details:**
@@ -247,7 +247,7 @@ Decoupling application lifecycles from platform lifecycles allows developers to 
   ```
 
   ```bash
-  touch environments/dev/us-east-1/auth-api/{versions,main,provider}.tf
+  touch environments/dev/us-east-1/auth-api/{versions,backend,provider}.tf
   ```
 
   #### 2) Create `versions.tf`
@@ -267,9 +267,9 @@ Decoupling application lifecycles from platform lifecycles allows developers to 
   }
   ```
 
-  #### 3) Create `main.tf` (Backend Configuration)
+  #### 3) Create `backend.tf` (Backend Configuration)
 
-  Create `environments/dev/us-east-1/auth-api/main.tf`:
+  Create `environments/dev/us-east-1/auth-api/backend.tf`:
 
   _(Note: Replace `YOUR_BUCKET_NAME` and `YOUR_DYNAMODB_TABLE` with the values found above.)_
 

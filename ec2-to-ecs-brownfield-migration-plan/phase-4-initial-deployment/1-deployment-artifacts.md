@@ -25,6 +25,7 @@ Before automating deployments, we must verify that the "golden path" (build -> p
 ### Story 1.1: Provision ECR Repository
 
 - **Title:** Provision ECR Repository for Container Images
+- **Target Layer:** `environments/dev/us-east-1/02-storage` (Workload Account)
 - **Persona:** As a **DevOps engineer**, I need a secure container registry so that I can store and deploy Docker images to ECS.
 
 **Business Value:** Provides secure, managed Docker registry with encryption, vulnerability scanning, and lifecycle policies. ECR integration with AWS services (ECS, Lambda) simplifies deployments and reduces costs vs external registries.
@@ -40,11 +41,14 @@ Before automating deployments, we must verify that the "golden path" (build -> p
 
   **Option A: Terraform (Recommended)**
 
-  Create `terraform/modules/ecr/main.tf`:
+  Navigate to your Workload Account storage layer:
+  `infra-platform/environments/dev/us-east-1/02-storage`
+
+  Create `ecr.tf`:
 
   ```hcl
   resource "aws_ecr_repository" "main" {
-    name                 = var.repository_name
+    name                 = "legacy-migration/${var.service_name}" # e.g. auth-api
     image_tag_mutability = "IMMUTABLE"
 
     image_scanning_configuration {
