@@ -32,15 +32,15 @@ This phase establishes the foundational infrastructure required to run ECS Farga
 
 ## Activities
 
-### [Activity 1: Import Existing Network Infrastructure](1-import-existing-infrastructure.md)
+### [Activity 1: Import Existing Platform Infrastructure](1-import-platform-infrastructure.md)
 
-- **Goal**: Bring existing VPC and Network resources under Terraform control.
-- **Why**: Enables safe, tracked changes and disaster recovery (Infrastructure as Code).
+- **Goal**: Bring existing VPC, Network, Databases (RDS), and Security Groups under Platform Terraform control.
+- **Why**: Establishes the foundational "manufacturing plant" and security contract before migrating apps.
 
-### [Activity 2: Import Application Resources](2-import-application-resources.md)
+### [Activity 2: Import Legacy Application Workloads](2-import-application-resources.md)
 
-- **Goal**: Bring existing compute (EC2) and database (RDS) resources under Terraform control.
-- **Why**: Allows managing legacy and new infrastructure in the same codebase.
+- **Goal**: Bring existing legacy compute (EC2) under Service Terraform control.
+- **Why**: Treats legacy EC2 as a "workload" to be managed alongside Fargate tasks during the transition.
 
 ### [Activity 3: Shared Infrastructure Setup](3-setup-shared-infrastructure.md)
 

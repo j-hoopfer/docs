@@ -23,7 +23,7 @@ _In this step, we are strictly focused on bringing the **Legacy EC2 Instances** 
 
 ## Prerequisites
 
-- [ ] [Activity 1: Import Existing Platform Infrastructure](1-import-existing-infrastructure.md) is complete (VPC, RDS, Security Groups).
+- [ ] [Activity 1: Import Existing Platform Infrastructure](1-import-platform-infrastructure.md) is complete (VPC, RDS, Security Groups).
 - [ ] Terraform initialized in `scale.infra-services`.
 - [ ] List of EC2 Instance IDs from Phase 1 Discovery.
 
