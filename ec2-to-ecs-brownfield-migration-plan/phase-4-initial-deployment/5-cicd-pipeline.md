@@ -97,6 +97,136 @@ Before building the pipeline, ensure:
 
 ---
 
+### Story 5.3: Configure Deployer IAM Permissions
+
+- **Title:** Grant CI/CD Pipeline Permission to Deploy ECS Services
+- **Persona:** As a **DevOps engineer**, I need the CI/CD deployer role to have `iam:PassRole` permission so that GitHub Actions can deploy ECS services with the correct Task and Execution Roles.
+
+- **Requirements:**
+  - CI/CD deployer can register task definitions
+  - CI/CD deployer can update ECS services
+  - CI/CD deployer can pass Task Role and Execution Role to ECS
+  - Permissions follow least-privilege principle
+
+- **Implementation Details:**
+  - **The Problem:**
+    - When GitHub Actions runs `aws ecs register-task-definition`, it needs to specify:
+      - `taskRoleArn` (role the application uses)
+      - `executionRoleArn` (role ECS uses to pull image and fetch secrets)
+    - **Without `iam:PassRole`, deployment fails with:**
+      ```
+      User: arn:aws:sts::123456789012:assumed-role/GitHubActionsDeployerRole/...
+      is not authorized to perform: iam:PassRole on resource: arn:aws:iam::123456789012:role/ECSTaskRole
+      ```
+  - **Create Deployer Role Policy:**
+
+    ```hcl
+    # terraform/iam-deployer.tf
+
+    resource "aws_iam_role" "github_actions_deployer" {
+      name = "GitHubActionsDeployerRole"
+
+      assume_role_policy = jsonencode({
+        Version = "2012-10-17"
+        Statement = [{
+          Effect = "Allow"
+          Principal = {
+            Federated = aws_iam_openid_connect_provider.github.arn
+          }
+          Action = "sts:AssumeRoleWithWebIdentity"
+          Condition = {
+            StringEquals = {
+              "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+            }
+            StringLike = {
+              "token.actions.githubusercontent.com:sub" = "repo:my-org/my-repo:*"
+            }
+          }
+        }]
+      })
+    }
+
+    resource "aws_iam_role_policy" "deployer_ecs" {
+      name = "ECSDeploymentPolicy"
+      role = aws_iam_role.github_actions_deployer.id
+
+      policy = jsonencode({
+        Version = "2012-10-17"
+        Statement = [
+          {
+            Sid = "ECSDeployment"
+            Effect = "Allow"
+            Action = [
+              "ecs:RegisterTaskDefinition",
+              "ecs:DeregisterTaskDefinition",
+              "ecs:DescribeTaskDefinition",
+              "ecs:DescribeServices",
+              "ecs:UpdateService",
+              "ecs:ListTasks",
+              "ecs:DescribeTasks"
+            ]
+            Resource = "*"
+          },
+          {
+            Sid = "PassRoleToECS"
+            Effect = "Allow"
+            Action = "iam:PassRole"
+            Resource = [
+              aws_iam_role.ecs_task_role.arn,
+              aws_iam_role.ecs_execution_role.arn
+            ]
+            Condition = {
+              StringEquals = {
+                "iam:PassedToService": "ecs-tasks.amazonaws.com"
+              }
+            }
+          },
+          {
+            Sid = "ECRAccess"
+            Effect = "Allow"
+            Action = [
+              "ecr:GetAuthorizationToken",
+              "ecr:BatchCheckLayerAvailability",
+              "ecr:GetDownloadUrlForLayer",
+              "ecr:BatchGetImage"
+            ]
+            Resource = "*"
+          }
+        ]
+      })
+    }
+    ```
+
+  - **Least-privilege PassRole:**
+    - **Restrict to specific roles:** Only allow passing the Task and Execution roles (not all roles)
+    - **Restrict to ECS service:** `Condition: iam:PassedToService = ecs-tasks.amazonaws.com`
+    - This prevents deployer from passing arbitrary roles to other services
+  - **Test deployment:**
+
+    ```bash
+    # Assume deployer role
+    aws sts assume-role --role-arn arn:aws:iam::123456789012:role/GitHubActionsDeployerRole
+
+    # Try registering task definition
+    aws ecs register-task-definition \
+      --family my-app \
+      --task-role-arn arn:aws:iam::123456789012:role/ECSTaskRole \
+      --execution-role-arn arn:aws:iam::123456789012:role/ECSExecutionRole \
+      --container-definitions '[...]'
+
+    # Should succeed with iam:PassRole permission
+    ```
+
+- **Acceptance Criteria:**
+  - ✅ Deployer role created with OIDC trust for GitHub Actions
+  - ✅ `iam:PassRole` permission granted for Task and Execution roles only
+  - ✅ Condition restricts PassRole to `ecs-tasks.amazonaws.com`
+  - ✅ CI/CD pipeline can register task definitions
+  - ✅ CI/CD pipeline can update ECS services
+  - ✅ Attempting to pass other IAM roles fails (security test)
+
+---
+
 ### Story 6.2: Workflow Deployment
 
 **Business Value:** Automates the complete deployment pipeline from code commit to production release. Standardized workflow (20-30 minutes setup) ensures every deployment is built, tested, and deployed identically, reducing human error. Automated builds trigger on git push/tag, ensuring production reflects the source of truth. Version tagging strategy enables rollback capability and clear release tracking.

@@ -35,33 +35,42 @@ This phase establishes the foundational infrastructure required to run ECS Farga
 ### [Activity 1: Import Existing Platform Infrastructure](1-import-platform-infrastructure.md)
 
 - **Goal**: Bring existing VPC, Network, Databases (RDS), and Security Groups under Platform Terraform control.
-- **Why**: Establishes the foundational "manufacturing plant" and security contract before migrating apps.
+- **Why**: Establishes the foundational "manufacturing plant" baseline.
 
-### [Activity 2: Import Legacy Application Workloads](2-import-application-resources.md)
+### [Activity 2: Remediate Network Gaps (New!)](2-remediate-network-gaps.md)
+
+- **Goal**: Patch the legacy network to support Fargate (Add Private Subnets, NAT Gateways, SG Rules).
+- **Why**: Closes the gap between "Legacy Flat Network" and "Secure Container Network" identified in Discovery.
+
+### [Activity 3: Import Legacy Application Workloads (Optional)](3-import-application-resources.md)
 
 - **Goal**: Bring existing legacy compute (EC2) under Service Terraform control.
-- **Why**: Treats legacy EC2 as a "workload" to be managed alongside Fargate tasks during the transition.
+- **Why**: Treats legacy EC2 as a managed "workload" to be strangled alongside Fargate.
+- **Note**: This can be skipped if you prefer to manually delete the old EC2 instances in Phase 6 rather than spending time importing them into Terraform.
 
-### [Activity 3: Shared Infrastructure Setup](3-setup-shared-infrastructure.md)
+### [Activity 4: Shared Infrastructure Setup](4-setup-shared-infrastructure.md)
 
-- **Goal**: Provision proper Networking (VPC endpoints), Load Balancers (ALB), and ECS Cluster.
+- **Goal**: Provision the **new** components: Load Balancers (ALB) and ECS Cluster.
 - **Key Features**:
+  - **Shared Public ALB** for internet traffic.
   - **Internal ALB** for Strangler Fig migration pattern.
   - **Internal DNS (Route 53)** for stable service-to-service communication.
 
-### [Activity 4: Security Infrastructure](4-security-infrastructure.md)
+### [Activity 5: Security Infrastructure](5-security-infrastructure.md)
 
-- **Goal**: Implement defense-in-depth networking and IAM.
-- **Stories**: Application Security Groups, Database Access Rules, IAM Task Roles.
+- **Goal**: Implement defense-in-depth networking and IAM for the future state.
+- **Stories**: Fargate Task Security Groups, IAM Task Roles (distinct from Legacy EC2 roles).
 
-### [Activity 5: Artifact Management](5-artifact-management.md)
+### [Activity 6: Artifact Management](6-artifact-management.md)
 
 - **Goal**: Secure container registry (ECR).
 - **Stories**: ECR creation, Lifecycle policies, Seed image pushing.
 
 ## Success Criteria
 
-- `terraform plan` shows no changes for imported resources.
-- ECS Cluster is active and providing capacity.
-- ALB is responding to HTTP requests.
-- ECR repositories are ready to receive images.
+- `terraform plan` shows no changes for all imported resources (Activity 1 & 3).
+- **Gap Report from Phase 1 is fully resolved** (Private Subnets and NAT Gateway exist).
+- ECS Cluster is active and providing Fargate capacity (Activity 4).
+- Shared ALB is responding and returning 404 (no apps registered yet — expected) (Activity 4).
+- ECR repositories are created and ready to receive images (Activity 6).
+- IAM Task Execution Role and Task Role exist with least-privilege policies (Activity 5).

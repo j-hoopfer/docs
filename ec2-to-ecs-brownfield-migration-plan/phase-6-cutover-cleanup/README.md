@@ -2,14 +2,14 @@
 
 ## Context & Themes
 
-This phase focuses on the critical transition from legacy EC2 infrastructure to the new Fargate platform. It employs the Strangler Fig pattern to migrate traffic gradually, ensuring minimal risk and zero downtime. Once traffic is fully shifted, legacy resources are safely decommissioned.
+This phase focuses on **completing** the Strangler Fig traffic migration, then cleaning up the decommissioned legacy infrastructure. The Strangler Fig weighted-routing pattern _began_ in Phase 4, where an initial small percentage of traffic was shifted to Fargate. This phase increases the weight to 100% and decommissions the old EC2 instances once stable.
 
 **Key Themes:**
 
-- **Risk Mitigation:** Gradual traffic shifting (Strangler Fig) to catch issues early.
-- **Validation:** Canary releases and rollback mechanisms.
+- **Completion:** Shifting from "mostly Fargate" to "100% Fargate".
+- **Validation:** Canary releases and rollback mechanisms before final cutover.
 - **Cost Optimization:** Decommissioning expensive EC2 instances once they are no longer needed.
-- **Clean State:** Ensuring no orphaned resources are left behind.
+- **Clean State:** Ensuring no orphaned resources (SGs, Route 53 records, EBS volumes) are left behind.
 
 ## Prerequisites
 

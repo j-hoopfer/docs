@@ -15,10 +15,12 @@ This phase focuses on deploying the first "pathfinder" service to the new infras
 
 Before starting this phase, ensure:
 
-- [ ] Phase 3 Completed (ECS Cluster, VPC Endpoints, and ALB are live).
+- [ ] Phase 3 Completed (ECS Cluster, ALB, ECR, and Security Infrastructure are live).
 - [ ] Dockerfile created and tested locally for the pilot service.
-- [ ] ECR Repository created (via Phase 3 artifact management).
+- [ ] ECR Repository created (via Phase 3 Activity 6: Artifact Management).
 - [ ] GitHub Actions secrets configured for AWS OIDC or access keys.
+
+> **Note on VPC Endpoints:** VPC Interface Endpoints (for ECR, Secrets Manager, CloudWatch) are a Day 2 optimization deferred to Phase X. Fargate tasks in private subnets will use the NAT Gateway for AWS service traffic in this phase.
 
 ## Theme: Deploying the First Production Service
 

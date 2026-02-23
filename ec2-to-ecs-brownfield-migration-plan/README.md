@@ -76,6 +76,21 @@ This separation ensures that application deployments in `dev` or `prod` do not i
 
 ## Network Architecture
 
+**Strategic Decision: Brownfield Strategy (Legacy VPC)**
+
+For this migration, we are explicitly choosing a **Brownfield Strategy**—deploying the new ECS Fargate Cluster into the **existing Legacy VPC** alongside the current EC2 instances.
+
+**Why not a new VPC?**
+Building a new, pristine VPC ("Greenfield") creates significant complexity for a Strangler Fig migration. It requires setting up VPC Peering or Transit Gateways, managing complex cross-VPC security groups, and risking "split-brain" connectivity issues where the new app cannot reach the old database.
+
+**Benefits of Legacy VPC:**
+
+1.  **Seamless Connectivity:** Fargate tasks and EC2 instances share the same network fabric, allowing immediate access to existing RDS databases and internal APIs without complex routing.
+2.  **Risk Reduction:** Eliminates the risk of peering failures or misconfigured route tables blocking critical traffic during the migration.
+3.  **Simpler Load Balancing:** A single Application Load Balancer can route traffic to both legacy EC2 instances (by Instance ID) and new Fargate tasks (by IP) simultaneously. This is the core mechanism that enables the gradual **Strangler Fig** traffic shift.
+
+This approach is **80% faster** than building a new VPC and preserves the connectivity required for the Strangler Fig migration.
+
 ### Pre-Migration Architecture (EC2-Based)
 
 ```mermaid
@@ -198,21 +213,24 @@ graph TB
 
 This plan follows a phased approach with clear dependencies and checkpoints:
 
-### Phase 0: Prerequisites
+### Phase 0: [Prerequisites](phase-0-prerequisites/README.md)
 
 - **Duration:** 1-2 days
 - **Deliverables:**
-  - Developers onboarded
-  - Initialize the shared infrastructure repository.
-  - Initialize the application deployment repository.
+  - Terraform State Bootstrap completed (S3 + DynamoDB).
+  - `infra-platform` repository initialized with layered directory structure.
+  - `infra-services` repository initialized.
+  - `terraform init` succeeds in all layer directories.
 
 ### Phase 1: [Discovery](phase-1-discovery/README.md)
 
 - **Duration:** 3-5 days
 - **Deliverables:**
-  - Infrastructure inventory,
-  - migration blockers identified
-- **Checkpoint:** Discovery review meeting
+  - Application audit (Fargate blockers identified).
+  - Infrastructure inventory (VPC, Subnets, SGs, RDS).
+  - **Network Gap Report** (input to Phase 3 Activity 2: Gap Remediation).
+  - Migration plan with service order and rollback strategy.
+- **Checkpoint:** Discovery review meeting with team sign-off.
 
 ### Phase 2: Application Readiness
 
@@ -254,12 +272,14 @@ This plan follows a phased approach with clear dependencies and checkpoints:
 
 - **Duration:** 2-3 weeks
 - **Deliverables:**
-  - Imported existing network and application resources (Terraform)
+  - Imported existing network resources (Terraform)
+  - **Remediated Network Gaps** (Private Subnets, NAT Gateways added to Legacy VPC)
   - Shared Infrastructure Created (ALB, ECS Cluster, Service Discovery)
-  - Security Infrastructure (Security Groups, IAM Roles)
+  - Security Infrastructure (Fargate SGs, IAM Roles)
   - Artifact Management (ECR Repositories)
+  - _(Optional)_ Imported Legacy EC2 resources into Terraform
 - **Checkpoint:** Infrastructure validated, state matches reality, zero production impact
-- **Key Story:** Import existing infrastructure to Terraform (brownfield-specific)
+- **Key Story:** Import existing infrastructure & close network gaps (brownfield-specific)
 
 ### Phase 4: [Initial Deployment](phase-4-initial-deployment/README.md)
 
@@ -291,39 +311,46 @@ This plan follows a phased approach with clear dependencies and checkpoints:
 ## Phase Visualization
 
 ```
-        ▼                       ▼
+┌───────────────────────────────────────────────────────────┐
+│  PRE-WORK (Blocking)                                      │
+│  Phase 0: Repo & Terraform Bootstrap Setup                │
+│  Phase 1: Discovery & Audit → produces Gap Report         │
+└──────────────────┬────────────────────────────────────────┘
+                   │
+        ▼ (Parallel Tracks) ▼
 ┌───────────────────┐   ┌───────────────────┐
 │ PHASE 2 (App)     │   │ PHASE 3 (Infra)   │
-│ • Dockerfile      │   │ • VPC/Subnets     │
-│ • 12-factor fixes │   │ • ALB + ACM cert  │
-│ • Env vars        │   │ • ECS Cluster     │
-│ • Logging stdout  │   │ • ECR repos       │
-│ • Health endpoint │   │ • IAM roles       │
-│ • Local testing   │   │ • Secrets Manager │
+│ • 12-factor fixes │   │ • Import VPC/RDS  │
+│ • Env vars        │   │ • Remediate gaps  │
+│ • Logging stdout  │   │ • ALB + ACM cert  │
+│ • Health endpoint │   │ • ECS Cluster     │
+│ • Dockerfile      │   │ • ECR repos       │
+│ • Local testing   │   │ • IAM roles       │
 └────────┬──────────┘   └────────┬──────────┘
          │                       │
          └───────────┬───────────┘
                      ▼
          ┌───────────────────────┐
          │ PHASE 4 (Deploy)      │
-         │ • Security groups     │
          │ • Task definition     │
          │ • ECS Service         │
+         │ • ALB routing (5%→)  │
          │ • CI/CD pipeline      │
+         │ • Security audit      │
          └───────────┬───────────┘
                      ▼
          ┌───────────────────────┐
          │ PHASE 5 (SCALING)     │
          │ • Reusable workflows  │
-         │ • Service discovery   │
-         │ • IaC (Terraform)     │
+         │ • Terraform modules   │
          │ • Auto-scaling        │
+         │ • Migrate all apps    │
          └───────────┬───────────┘
                      ▼
          ┌───────────────────────┐
          │ PHASE 6 (CUTOVER)     │
-         │ • Strangler Fig       │
-         │ • Canary Release      │
+         │ • 100% traffic shift  │
+         │ • Canary validation   │
          │ • Decommission EC2    │
          └───────────────────────┘
 ```
@@ -332,32 +359,32 @@ This plan follows a phased approach with clear dependencies and checkpoints:
 
 ## Team Responsibilities
 
-### App Teams (Phase 1)
+### App / Dev Team (Phase 2)
 
 | Task                              | Deliverable                           |
 | --------------------------------- | ------------------------------------- |
-| Create Dockerfile                 | Working `docker build` + `docker run` |
 | Refactor to environment variables | No hardcoded config or secrets        |
 | Implement `/health` endpoint      | Returns 200 OK quickly                |
 | Log to STDOUT/STDERR              | No file-based logging                 |
 | Handle SIGTERM gracefully         | Clean shutdown within 30s             |
 | Move sessions to Redis/DB         | No local session storage              |
 | Remove filesystem dependencies    | Use S3 for uploads                    |
+| Create Dockerfile                 | Working `docker build` + `docker run` |
 | Test locally                      | `docker run -e VAR=value` works       |
 
-### Infrastructure Team (Phase 2)
+### Platform / Infra Team (Phase 3)
 
-| Task                                | Deliverable                            |
-| ----------------------------------- | -------------------------------------- |
-| Create/configure VPC                | Public + private subnets in 2 AZs      |
-| Set up NAT Gateway or VPC Endpoints | Private subnets have internet access   |
-| Create ALB                          | Internet-facing with HTTPS listener    |
-| Request ACM certificate             | Validated and attached to ALB          |
-| Create ECS Cluster                  | Container Insights enabled             |
-| Create ECR repositories             | With lifecycle policies                |
-| Set up Secrets Manager              | All secrets migrated                   |
-| Create IAM roles                    | OIDC trust, Task Execution, Task roles |
-| Create CloudWatch Log Groups        | With retention policies                |
+| Task                                  | Deliverable                                    |
+| ------------------------------------- | ---------------------------------------------- |
+| Import existing VPC/Subnets to TF     | `terraform plan` = no changes                  |
+| Remediate network gaps                | Private subnets + NAT Gateway added if missing |
+| Create shared ALB (public + internal) | Internet-facing with HTTPS listener            |
+| Request ACM certificate               | Validated and attached to ALB                  |
+| Create ECS Cluster                    | Container Insights enabled                     |
+| Create ECR repositories               | With lifecycle policies                        |
+| Set up Secrets Manager                | All secrets migrated                           |
+| Create IAM roles                      | OIDC trust, Task Execution, Task roles         |
+| Create CloudWatch Log Groups          | With retention policies                        |
 
 ---
 

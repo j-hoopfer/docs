@@ -461,3 +461,76 @@ Before starting this audit, ensure:
   - ✅ Decision made: internal TLS required (yes/no)
   - ✅ If yes: implementation approach selected
   - ✅ If no: rationale documented for audit trail
+
+---
+
+## Feature 4: AWS Service Dependencies
+
+**Business Value:** Prevents deployment failures by identifying all AWS services the application depends on, ensuring network connectivity is planned correctly. Missing dependencies discovered during migration cause 30-40% of failed deployments and 2-4 hour rollback cycles. Documenting upfront enables proper VPC endpoint planning in Phase 3.
+
+### Story 4.1: Document AWS Service Dependencies
+
+- **Title:** Inventory AWS Service Dependencies for Network Planning
+- **Persona:** As a **cloud architect**, I need to identify all AWS services the application calls so that network connectivity (NAT Gateway, VPC Endpoints) can be configured correctly in Phase 3.
+
+- **Requirements:**
+  - Identify all AWS SDK calls in application code
+  - Document external AWS services accessed (S3, SES, DynamoDB, etc.)
+  - List required services for Fargate runtime (ECR, CloudWatch Logs, Secrets Manager)
+  - Understand outbound dependencies for third-party APIs
+
+- **Implementation Details:**
+  - **Search codebase for AWS SDK usage:**
+
+    ```bash
+    # Node.js
+    grep -r "require.*aws-sdk" .
+    grep -r "from.*@aws-sdk" .
+
+    # Python
+    grep -r "import boto3" .
+    grep -r "from boto" .
+
+    # Check which services are used
+    grep -r "\.s3\." .
+    grep -r "\.ses\." .
+    grep -r "\.dynamodb\." .
+    ```
+
+  - **Fargate Runtime Requirements (always needed):**
+    - ECR (Docker image pulls) — uses S3 for layer storage
+    - CloudWatch Logs (application logging)
+    - Secrets Manager or SSM Parameter Store (if using for secrets)
+  - **Common Application Dependencies:**
+    - **S3** — File storage, uploads, static assets
+    - **SES** — Email sending
+    - **DynamoDB** — NoSQL database
+    - **SNS/SQS** — Messaging/queues
+    - **Lambda** — Serverless function invocations
+    - **Step Functions** — Workflow orchestration
+  - **Third-Party/External APIs:**
+    - Payment processors (Stripe, PayPal)
+    - Monitoring (Datadog, New Relic, Honeycomb)
+    - Analytics (Segment, Mixpanel)
+    - Authentication (Auth0, Okta)
+    - Note: These require outbound internet access via NAT Gateway — VPC Endpoints do not cover public third-party endpoints.
+  - **Document findings in a dependency table:**
+
+    | Service         | Purpose        | Required? | Network Path        |
+    | :-------------- | :------------- | :-------- | :------------------ |
+    | ECR             | Docker images  | Yes       | NAT or VPC Endpoint |
+    | S3              | Image layers   | Yes       | NAT or VPC Endpoint |
+    | CloudWatch Logs | Logging        | Yes       | NAT or VPC Endpoint |
+    | Secrets Manager | DB credentials | Yes       | NAT or VPC Endpoint |
+    | SES             | Email sending  | If used   | NAT or VPC Endpoint |
+    | Stripe API      | Payments       | If used   | NAT (internet)      |
+    | Honeycomb       | Monitoring     | If used   | NAT (internet)      |
+
+  > **Note:** This table feeds directly into Phase 3 Activity 2 (network gap remediation) and Phase X (VPC Endpoints optimisation).
+
+- **Acceptance Criteria:**
+  - ✅ All AWS SDK calls identified in codebase
+  - ✅ Fargate runtime dependencies documented (ECR, Logs, Secrets)
+  - ✅ Application AWS service usage documented
+  - ✅ External/third-party API dependencies listed
+  - ✅ Dependency table committed to repo for Phase 3 handoff

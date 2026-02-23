@@ -29,7 +29,9 @@ _In this step, we are strictly focused on bringing the **Legacy EC2 Instances** 
 
 ---
 
-## Feature 2: Import Legacy Application to Terraform
+## Feature 2: Import Legacy Application to Terraform (Optional)
+
+> **⚠️ Recommendation:** If your legacy EC2 instances are going to be destroyed in a few weeks anyway once Fargate is live, you might consider **skipping this activity**. Importing legacy, manually-provisioned EC2 instances into Terraform can sometimes be a massive rabbit hole of drift and manual state fixing. If you skip this, you will simply terminate the EC2 instances manually via the AWS Console in Phase 6 once the Fargate migration is complete.
 
 **Business Value:** Enables the Service team to own their legacy infrastructure. Moving EC2 import to the Services layer allows developers to self-service the eventual teardown of these instances.
 

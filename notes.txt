@@ -29,3 +29,6 @@ security-infrastructure and artifact-management are numbered wrong and missing b
 need to remove Junior Engineer Context from the files
 make sure tflint is a part of the workflow
 need to fix the ci items added to the repo setup, and i want them to be setup like they are in the bootstrap plan
+
+
+need to confirm how i would query aws resources across multiple accounts

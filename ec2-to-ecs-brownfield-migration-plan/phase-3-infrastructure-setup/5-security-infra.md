@@ -1,10 +1,10 @@
-# Activity 4: Security Infrastructure
+# Activity 5: Security Infrastructure
 
 **Goal:** Implement defense-in-depth networking by creating granular Security Groups before deploying any applications.
 
 ## Context & Themes
 
-Security Groups are the primary firewall for your containers. By creating them upfront with a "chaining" pattern (ALB SG -> Task SG), we enforce strict network segmentation and prevent unauthorized access.
+Security Groups are the primary firewall for your containers. By creating them upfront with a "chaining" pattern (ALB SG -> Task SG), we enforce strict network segmentation and prevent unauthorized access. For a detailed explanation of how Security Groups work in Fargate compared to EC2, see [Appendix: How Security Groups Work in ECS Fargate](appendix/ecs-fargate-security-groups.md).
 
 **Key Themes:**
 
@@ -18,19 +18,21 @@ Security Groups are the primary firewall for your containers. By creating them u
 - [ ] Platform Repository Setup completed.
 - [ ] Terraform state is clean and up to date.
 
-## Feature 4: Application Security Groups
+## Feature 5: Security Infrastructure
 
 **Business Value:** Implements defense-in-depth security preventing direct container access even if IP addresses leak, reducing attack surface by 90%. Security group chaining (2-3 hours setup, free) ensures only ALB can reach containers, preventing lateral movement attacks where compromised instances attack other services. Required for PCI/SOC 2 compliance (network segmentation) and prevents 80% of cloud security breaches caused by overly permissive security rules.
 
 > **Note:** Security groups are infrastructure, owned by the SRE/Infra team. Creating them in Phase 3 allows parallel work — infra team sets up SGs while app teams work on Phase 2 containerization.
 
-### Story 4.1: Create Application Security Groups
+### Story 5.1: Create Application Security Groups
 
 - **Title:** Create Per-Application Security Groups for Fargate Tasks
-- **Target Layer:** `environments/dev/us-east-1/01-compute` (Workload Account) or `infra-services`
-- **Persona:** As a **Security Engineer**, I want to create application security groups upfront so that they're ready when we deploy services in Phase 3.
+- **Target Repo:** `scale.infra-services` — `environments/dev/us-east-1/[app-name]/` (one stack per service)
+- **Persona:** As a **Platform Engineer**, I want to bootstrap the services repository with pre-configured application security groups so that SWEs have a secure-by-default starting point in Phase 4.
 
 **Business Value:** Establishes least-privilege network access preventing unauthorized connections to containers. Security group chaining (30 minutes per app) ensures only ALB traffic reaches containers, preventing 90% of lateral movement attacks in cloud breaches. Creating all SGs upfront (batch 2-3 hours for 10 apps) enables parallel deployment work and prevents Phase 3 deployment delays. Free to create, only costs when attached to resources.
+
+> **Enterprise Golden Path:** The Platform Team is intentionally working inside the `scale.infra-services` repository here. By pre-creating these Security Groups, the Platform Team ensures strict security compliance (only allowing ALB traffic) and provides a "secure-by-default" scaffold so SWEs don't have to write complex networking Terraform in Phase 4. See [Appendix: Platform Bootstrapping Model](appendix/platform-bootstrapping-model.md) for more details.
 
 - **Requirements:**
   - One security group per application (or reuse existing if appropriate)
@@ -77,9 +79,10 @@ Security Groups are the primary firewall for your containers. By creating them u
 
 ---
 
-### Story 2.6: Update Database Security Groups for Fargate Access
+### Story 5.2: Update Database Security Groups for Fargate Access
 
 - **Title:** Allow Fargate Task Security Groups to Access Databases
+- **Target Repo:** `scale.infra-platform` — `environments/dev/us-east-1/02-storage/` (or wherever your database Terraform state is managed)
 - **Persona:** As a **Security Engineer**, I want to update database security groups now so that Fargate tasks can connect when deployed in Phase 3.
 
 **Business Value:** Enables Fargate database connectivity while maintaining security boundaries, preventing Phase 3 deployment failures. Updating database SGs upfront (1-2 hours for all databases) eliminates "cannot connect to database" errors that block 40% of first Fargate deployments. Adding rules now (while preserving EC2 access) enables safe parallel migration without service interruption. Prevents 2-4 hour debugging cycles discovering SG issues after deployment.
@@ -88,6 +91,7 @@ Security Groups are the primary firewall for your containers. By creating them u
   - RDS security group must allow inbound from each Fargate task security group
   - Same applies to ElastiCache, OpenSearch, or any data stores
   - Updates can be done before Fargate tasks are deployed (SG rules are forward-looking)
+  - See [Appendix: How Security Groups Work in ECS Fargate](appendix/ecs-fargate-security-groups.md) for a deep dive into the Fargate networking model.
 
 - **Implementation Details:**
   - **Add Inbound Rules to RDS Security Group:**
@@ -122,11 +126,11 @@ Security Groups are the primary firewall for your containers. By creating them u
 
 ---
 
-## Feature 4: Secrets Management
+### Story 5.3: Secrets Manager Setup (Overview)
 
 **Business Value:** Eliminates hardcoded credentials security risk and enables automated secret rotation, critical for SOC 2/PCI compliance. Secrets Manager ($0.40/secret/month, typically $10-40/month total) prevents credentials in source code or task definitions, eliminating the #1 cause of cloud data breaches (exposed credentials). Automatic encryption, audit logging, and rotation prevent manual credential management overhead (2-4 hours/month) and eliminate "forgot to rotate production password" security incidents. Required for compliance certifications.
 
-### Story 4.1: Secrets Manager Setup
+#### Story 5.3 Details
 
 - **Title:** Migrate Secrets to AWS Secrets Manager
 - **Persona:** As a **Security Engineer**, I want application secrets stored in Secrets Manager so that credentials are encrypted, auditable, and not hardcoded in task definitions.
@@ -180,9 +184,7 @@ Security Groups are the primary firewall for your containers. By creating them u
 
 ---
 
-## Feature 5: IAM Roles
-
-### Story 5.1: Task Execution Role (Shared)
+### Story 5.4: Task Execution Role (Shared)
 
 - **Title:** Create ECS Task Execution Role
 - **Persona:** As a **Cloud Admin**, I want a shared Task Execution Role so that Fargate can pull images and write logs without per-app IAM setup.
@@ -234,198 +236,3 @@ Security Groups are the primary firewall for your containers. By creating them u
   - ✅ Role exists with correct trust policy
   - ✅ Role has `AmazonECSTaskExecutionRolePolicy` attached
   - ✅ Role can read from Secrets Manager (test with `aws sts assume-role`)
-
----
-
-### Story 5.2: Task Role Template (Per-App)
-
-- **Title:** Create Application-Specific Task Role
-- **Persona:** As a **Cloud Admin**, I want per-application Task Roles so that each app has only the AWS permissions it needs (least privilege).
-
-- **Requirements:**
-  - Separate role per application (if app needs AWS access)
-  - Only permissions required by application code
-  - No hardcoded credentials in application
-
-- **Implementation Details:**
-  - **Role Name:** `[app-name]-task-role` (e.g., `auth-api-task-role`)
-  - **Trust Policy:** Same as Task Execution Role (ECS tasks)
-  - **Example Policies by Use Case:**
-    - **S3 Access:**
-      ```json
-      {
-        "Effect": "Allow",
-        "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
-        "Resource": "arn:aws:s3:::my-app-bucket/*"
-      }
-      ```
-    - **SQS Access:**
-      ```json
-      {
-        "Effect": "Allow",
-        "Action": [
-          "sqs:SendMessage",
-          "sqs:ReceiveMessage",
-          "sqs:DeleteMessage"
-        ],
-        "Resource": "arn:aws:sqs:us-east-1:123456789012:my-queue"
-      }
-      ```
-    - **SES Email:**
-      ```json
-      {
-        "Effect": "Allow",
-        "Action": ["ses:SendEmail", "ses:SendRawEmail"],
-        "Resource": "*",
-        "Condition": {
-          "StringEquals": { "ses:FromAddress": "noreply@mycompany.com" }
-        }
-      }
-      ```
-    - **DynamoDB Access:**
-      ```json
-      {
-        "Effect": "Allow",
-        "Action": ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:Query"],
-        "Resource": "arn:aws:dynamodb:us-east-1:123456789012:table/my-table"
-      }
-      ```
-  - **No Task Role Needed If:**
-    - App only talks to RDS/ElastiCache (uses network, not IAM)
-    - App only makes external API calls (no AWS services)
-
-- **Acceptance Criteria:**
-  - ✅ Task Role created for apps requiring AWS access
-  - ✅ Permissions scoped to specific resources (not `*`)
-  - ✅ No AWS credentials hardcoded in application
-  - ✅ Application can access required AWS services when running in Fargate
-
----
-
-### Story 5.3: Configure Deployer IAM Permissions
-
-- **Title:** Grant CI/CD Pipeline Permission to Deploy ECS Services
-- **Persona:** As a **DevOps engineer**, I need the CI/CD deployer role to have `iam:PassRole` permission so that GitHub Actions can deploy ECS services with the correct Task and Execution Roles.
-
-- **Requirements:**
-  - CI/CD deployer can register task definitions
-  - CI/CD deployer can update ECS services
-  - CI/CD deployer can pass Task Role and Execution Role to ECS
-  - Permissions follow least-privilege principle
-
-- **Implementation Details:**
-  - **The Problem:**
-    - When GitHub Actions runs `aws ecs register-task-definition`, it needs to specify:
-      - `taskRoleArn` (role the application uses)
-      - `executionRoleArn` (role ECS uses to pull image and fetch secrets)
-    - **Without `iam:PassRole`, deployment fails with:**
-      ```
-      User: arn:aws:sts::123456789012:assumed-role/GitHubActionsDeployerRole/...
-      is not authorized to perform: iam:PassRole on resource: arn:aws:iam::123456789012:role/ECSTaskRole
-      ```
-  - **Create Deployer Role Policy:**
-
-    ```hcl
-    # terraform/iam-deployer.tf
-
-    resource "aws_iam_role" "github_actions_deployer" {
-      name = "GitHubActionsDeployerRole"
-
-      assume_role_policy = jsonencode({
-        Version = "2012-10-17"
-        Statement = [{
-          Effect = "Allow"
-          Principal = {
-            Federated = aws_iam_openid_connect_provider.github.arn
-          }
-          Action = "sts:AssumeRoleWithWebIdentity"
-          Condition = {
-            StringEquals = {
-              "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-            }
-            StringLike = {
-              "token.actions.githubusercontent.com:sub" = "repo:my-org/my-repo:*"
-            }
-          }
-        }]
-      })
-    }
-
-    resource "aws_iam_role_policy" "deployer_ecs" {
-      name = "ECSDeploymentPolicy"
-      role = aws_iam_role.github_actions_deployer.id
-
-      policy = jsonencode({
-        Version = "2012-10-17"
-        Statement = [
-          {
-            Sid = "ECSDeployment"
-            Effect = "Allow"
-            Action = [
-              "ecs:RegisterTaskDefinition",
-              "ecs:DeregisterTaskDefinition",
-              "ecs:DescribeTaskDefinition",
-              "ecs:DescribeServices",
-              "ecs:UpdateService",
-              "ecs:ListTasks",
-              "ecs:DescribeTasks"
-            ]
-            Resource = "*"
-          },
-          {
-            Sid = "PassRoleToECS"
-            Effect = "Allow"
-            Action = "iam:PassRole"
-            Resource = [
-              aws_iam_role.ecs_task_role.arn,
-              aws_iam_role.ecs_execution_role.arn
-            ]
-            Condition = {
-              StringEquals = {
-                "iam:PassedToService": "ecs-tasks.amazonaws.com"
-              }
-            }
-          },
-          {
-            Sid = "ECRAccess"
-            Effect = "Allow"
-            Action = [
-              "ecr:GetAuthorizationToken",
-              "ecr:BatchCheckLayerAvailability",
-              "ecr:GetDownloadUrlForLayer",
-              "ecr:BatchGetImage"
-            ]
-            Resource = "*"
-          }
-        ]
-      })
-    }
-    ```
-
-  - **Least-privilege PassRole:**
-    - **Restrict to specific roles:** Only allow passing the Task and Execution roles (not all roles)
-    - **Restrict to ECS service:** `Condition: iam:PassedToService = ecs-tasks.amazonaws.com`
-    - This prevents deployer from passing arbitrary roles to other services
-  - **Test deployment:**
-
-    ```bash
-    # Assume deployer role
-    aws sts assume-role --role-arn arn:aws:iam::123456789012:role/GitHubActionsDeployerRole
-
-    # Try registering task definition
-    aws ecs register-task-definition \
-      --family my-app \
-      --task-role-arn arn:aws:iam::123456789012:role/ECSTaskRole \
-      --execution-role-arn arn:aws:iam::123456789012:role/ECSExecutionRole \
-      --container-definitions '[...]'
-
-    # Should succeed with iam:PassRole permission
-    ```
-
-- **Acceptance Criteria:**
-  - ✅ Deployer role created with OIDC trust for GitHub Actions
-  - ✅ `iam:PassRole` permission granted for Task and Execution roles only
-  - ✅ Condition restricts PassRole to `ecs-tasks.amazonaws.com`
-  - ✅ CI/CD pipeline can register task definitions
-  - ✅ CI/CD pipeline can update ECS services
-  - ✅ Attempting to pass other IAM roles fails (security test)

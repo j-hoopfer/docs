@@ -494,7 +494,9 @@ resource "aws_subnet" "private" {
 
 ### Step 5: Reference Outputs Across Projects
 
-Use `terraform_remote_state` data source to reference outputs:
+Use `terraform_remote_state` data source to reference outputs from another stack.
+
+> **Prerequisite:** The publishing stack must have an `outputs.tf` that explicitly exports the values you want to consume. Terraform only writes named outputs into the state file — if there is no `outputs.tf` (or the value you want isn't declared there), the state file publishes nothing and `data.terraform_remote_state.*.outputs` returns an empty object. Think of `outputs.tf` as defining the API surface of a stack; the `data` block in the consumer repo is the client calling that API. See [Appendix: Infrastructure Contract](../ec2-to-ecs-brownfield-migration-plan/phase-3-infrastructure-setup/appendix/infrastructure-contract-and-breaking-changes.md) for the full publisher/consumer pattern.
 
 **In your ECS application project:**
 
