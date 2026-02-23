@@ -372,14 +372,31 @@ All four cert-related resources live in `acm.tf`. They form a single logical uni
 
 `route53.tf` is reserved exclusively for the private hosted zone (`aws_route53_zone.internal`) used for internal service discovery.
 
+### File: `variables.tf`
+
+```hcl
+variable "domain_name" {
+  description = "Apex domain name for ACM certificate and Route 53 hosted zone lookup (e.g. example.com). Set per environment in the corresponding .tfvars file."
+  type        = string
+}
+```
+
+Set the value in your environment-specific `.tfvars` file (e.g. `dev.auto.tfvars`):
+
+```hcl
+domain_name = "example.com" # Replace with your real domain
+```
+
+This avoids hardcoding the domain in Terraform source and allows each environment (dev, staging, prod) to use its own domain or subdomain without modifying code.
+
 ### File: `acm.tf`
 
 ```hcl
 # ── Certificate ───────────────────────────────────────────────────────────────
 # Step 1: Request the certificate
 resource "aws_acm_certificate" "main" {
-  domain_name               = "*.example.com"    # Replace with your real domain — covers all subdomains
-  subject_alternative_names = ["example.com"]    # Also covers the apex (e.g. example.com with no subdomain)
+  domain_name               = "*.${var.domain_name}"  # Covers all subdomains — set via variables.tf
+  subject_alternative_names = [var.domain_name]       # Also covers the apex (e.g. example.com with no subdomain)
   validation_method         = "DNS"
 
   lifecycle {
@@ -395,7 +412,7 @@ resource "aws_acm_certificate" "main" {
 data "aws_route53_zone" "public" {
   provider = aws.dns
 
-  name         = "example.com" # Replace with your real apex domain (no wildcard)
+  name         = var.domain_name # Apex domain — no wildcard
   private_zone = false
 }
 

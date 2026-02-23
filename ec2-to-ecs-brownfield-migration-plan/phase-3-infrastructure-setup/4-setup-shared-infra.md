@@ -52,12 +52,21 @@ You must satisfy all of the following before this story can complete successfull
 **Terraform Example:**
 
 ```hcl
+# File: variables.tf
+
+variable "domain_name" {
+  description = "Apex domain name for ACM certificate and Route 53 hosted zone lookup (e.g. example.com). Set per environment in the corresponding .tfvars file."
+  type        = string
+}
+```
+
+```hcl
 # File: acm.tf
 
 # ── Certificate ────────────────────────────────────────────────────────────────
 resource "aws_acm_certificate" "main" {
-  domain_name               = "*.example.com" # Replace with your real domain
-  subject_alternative_names = ["example.com"] # Also cover the apex
+  domain_name               = "*.${var.domain_name}" # Covers all subdomains — set via variables.tf
+  subject_alternative_names = [var.domain_name]      # Also cover the apex
   validation_method         = "DNS"
 
   lifecycle {
@@ -72,7 +81,7 @@ resource "aws_acm_certificate" "main" {
 data "aws_route53_zone" "public" {
   provider = aws.dns
 
-  name         = "example.com"
+  name         = var.domain_name
   private_zone = false
 }
 
@@ -150,6 +159,7 @@ data "terraform_remote_state" "network" {
     region = "us-east-1"
   }
 }
+
 ```
 
 ```hcl
@@ -245,7 +255,7 @@ resource "aws_lb_listener" "https" {
 
 - **Scheme:** `internal` (Critical!).
 - **Subnets:** Reference the **Private Subnets** from Network Layer.
-- **Security Group:** Allow 80/443 from within `10.0.0.0/16` (VPC CIDR).
+- **Security Group:** Allow 80/443 from within the VPC CIDR (sourced from `data.terraform_remote_state.network.outputs.vpc_cidr_block` — avoids hardcoding and automatically stays in sync with the `00-network` layer). See Story 1.1 for the required `vpc_cidr_block` output on the network layer.
 
 **Terraform Example:**
 
@@ -261,13 +271,13 @@ resource "aws_security_group" "alb_internal" {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
-    cidr_blocks = ["10.0.0.0/16"] # Replace with your VPC CIDR
+    cidr_blocks = [data.terraform_remote_state.network.outputs.vpc_cidr_block]
   }
   ingress {
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
-    cidr_blocks = ["10.0.0.0/16"]
+    cidr_blocks = [data.terraform_remote_state.network.outputs.vpc_cidr_block]
   }
   egress {
     from_port   = 0

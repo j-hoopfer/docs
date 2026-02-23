@@ -185,7 +185,7 @@ By default, CloudWatch Log Groups are encrypted using an AWS-managed key. Settin
 
 ECS Exec sessions can capture sensitive output: environment variable values, secrets that a developer `echo`s or a misconfigured app prints to stdout, internal service hostnames, etc. Encrypting audit logs ensures this data is protected at rest.
 
-**Note:** To use a customer-managed KMS key (CMK) instead of the AWS-managed default, add a `kms_key_id` to the `aws_cloudwatch_log_group.ecs_exec` resource and update the `execute_command_configuration` to reference it. This is recommended for environments with strict data sovereignty or compliance requirements (PCI-DSS, HIPAA).
+**Encryption:** CloudWatch Log Groups are encrypted at rest using AWS-managed keys by default — when you omit kms_key_id, CloudWatch automatically uses the AWS-managed key aws/logs for your account and region — nothing to configure.
 
 ---
 
