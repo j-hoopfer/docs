@@ -37,14 +37,15 @@ These detailed guides cover features that are considered out of scope for the in
 
 ### Operations & Governance
 
-| Feature Details                                                           | Category     | Recommendation                                                   |
-| :------------------------------------------------------------------------ | :----------- | :--------------------------------------------------------------- |
-| **[9. Disaster Recovery](9-disaster-recovery.md)**                        | Operations   | Plan separately. Includes RDS, ECR, and Secret backups.          |
-| **[10. Multi-Region Strategy](10-multi-region-strategy.md)**              | Architecture | Active-Passive configuration for high availability.              |
-| **[11. Compliance & Audit](11-compliance-and-audit.md)**                  | Compliance   | Implement CloudTrail, Config, GuardDuty as per requirements.     |
-| **[12. Certificate Management](12-certificate-management.md)**            | Operations   | Monitoring for ACM expiration and renewal validation.            |
-| **[13. Database Migration](13-database-migration-strategy.md)**           | Database     | Strategies for zero-downtime schema changes.                     |
-| **[14. Enterprise Data Contract](14-enterprise-data-source-contract.md)** | Governance   | Use SSM/Consul for loose coupling between Platform and Services. |
+| Feature Details                                                           | Category      | Recommendation                                                   |
+| :------------------------------------------------------------------------ | :------------ | :--------------------------------------------------------------- |
+| **[9. Disaster Recovery](9-disaster-recovery.md)**                        | Operations    | Plan separately. Includes RDS, ECR, and Secret backups.          |
+| **[10. Multi-Region Strategy](10-multi-region-strategy.md)**              | Architecture  | Active-Passive configuration for high availability.              |
+| **[11. Compliance & Audit](11-compliance-and-audit.md)**                  | Compliance    | Implement CloudTrail, Config, GuardDuty as per requirements.     |
+| **[12. Certificate Management](12-certificate-management.md)**            | Operations    | Monitoring for ACM expiration and renewal validation.            |
+| **[13. Database Migration](13-database-migration-strategy.md)**           | Database      | Strategies for zero-downtime schema changes.                     |
+| **[14. Enterprise Data Contract](14-enterprise-data-source-contract.md)** | Governance    | Use SSM/Consul for loose coupling between Platform and Services. |
+| **[15. Distributed Tracing](15-distributed-tracing.md)**                  | Observability | Defer until stable. Request ID in logs is sufficient for Day 1.  |
 
 ---
 

@@ -14,7 +14,7 @@ Now that the Network Foundation is remediated (private subnets exist), we build 
 
 ### Prerequisites
 
-- [ ] [Activity 2: Remediate Network Gaps](2-remediate-network-gaps.md) is complete (Network is ready).
+- [ ] [Activity 2: Remediate Network Gaps](2-remediate-infra-gaps.md) is complete (Network is ready).
 - [ ] [Activity 3: Import Legacy EC2](3-import-application-resources.md) is complete.
 
 ---
@@ -52,11 +52,43 @@ You must satisfy all of the following before this story can complete successfull
 **Terraform Example:**
 
 ```hcl
+# File: providers.tf
+#
+# The default provider targets the workload account where the ALB and certificate live.
+# The aws.dns alias assumes the cross-account role created in Activity 2, Story 2.4
+# and is used only for the Route 53 records needed to validate the ACM certificate.
+#
+# If the public hosted zone is in the SAME account, remove the assume_role block
+# and replace `provider = aws.dns` with `provider = aws` in acm.tf.
+
+provider "aws" {
+  region = var.aws_region
+}
+
+provider "aws" {
+  alias  = "dns"
+  region = "us-east-1" # Route 53 is global but the API endpoint is us-east-1
+
+  assume_role {
+    # ARN of the role created in Activity 2 Story 2.4 in the DNS/Shared Services account.
+    # Record this value in your tfvars or as a local — do not hardcode the account ID.
+    role_arn = var.dns_account_role_arn
+  }
+}
+```
+
+```hcl
 # File: variables.tf
 
 variable "domain_name" {
   description = "Apex domain name for ACM certificate and Route 53 hosted zone lookup (e.g. example.com). Set per environment in the corresponding .tfvars file."
   type        = string
+}
+
+variable "dns_account_role_arn" {
+  description = "ARN of the terraform-route53-dns-writer role in the DNS account (created in Activity 2 Story 2.4). Required for the aws.dns provider alias. Leave empty if the hosted zone is in the same account."
+  type        = string
+  default     = ""
 }
 ```
 

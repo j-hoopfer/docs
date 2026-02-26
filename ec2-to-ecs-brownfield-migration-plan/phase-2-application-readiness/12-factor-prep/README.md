@@ -57,6 +57,7 @@ This plan focuses on **application code changes** for cloud-native patterns. No 
 Before proceeding to containerization, verify:
 
 - ✅ Application reads all config from environment variables (no `.env` in codebase)
+- ✅ All application secrets created in AWS Secrets Manager (naming convention agreed, ARNs recorded)
 - ✅ No hardcoded secrets (verified with gitleaks scan)
 - ✅ Logs go to stdout/stderr (works on EC2, will work in containers)
 - ✅ Sessions stored in Redis/database (users stay logged in across server restarts)
@@ -83,8 +84,9 @@ Before proceeding to containerization, verify:
 
 - [Story 1: Find and Eliminate Hardcoded Secrets](1-configuration-and-secrets.md#story-1)
 - [Story 2: Migrate Configuration to Environment Variables](1-configuration-and-secrets.md#story-2)
+- [Story 3: Create Secrets in AWS Secrets Manager](1-configuration-and-secrets.md#story-3)
 
-**Validation:** Deploy to EC2 dev environment using only environment variables (no `.env` file in repo)
+**Validation:** Deploy to EC2 dev environment using only environment variables (no `.env` file in repo); all secrets exist in Secrets Manager with ARNs recorded
 
 ---
 
@@ -147,12 +149,12 @@ Before proceeding to containerization, verify:
 
 ## Team Assignment
 
-| Role                 | Responsibilities                                                                        |
-| -------------------- | --------------------------------------------------------------------------------------- |
-| **Development Team** | Implement stories 1-7, 11-15 (application code changes)                                 |
-| **DevOps Team**      | Implement stories 8-10 (infrastructure: EventBridge, workers); support development team |
-| **Security Team**    | Review story 1 (secrets scan), story 14 (rotation); approve changes                     |
-| **QA Team**          | Validate each phase on EC2 before proceeding to next phase                              |
+| Role                 | Responsibilities                                                                                                                |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| **Development Team** | Implement stories 1-7, 11-15 (application code changes)                                                                         |
+| **DevOps Team**      | Implement story 3 (Secrets Manager provisioning), stories 8-10 (infrastructure: EventBridge, workers); support development team |
+| **Security Team**    | Review story 1 (secrets scan), story 14 (rotation); approve changes                                                             |
+| **QA Team**          | Validate each phase on EC2 before proceeding to next phase                                                                      |
 
 ---
 
@@ -204,6 +206,7 @@ Before proceeding to the [Containerizing Services Plan](../containerizing-servic
 
 - [ ] All config read from environment variables (no `.env` files)
 - [ ] Zero secrets in codebase (gitleaks scan passes)
+- [ ] All application secrets created in AWS Secrets Manager with ARNs recorded
 - [ ] Application logs to stdout/stderr
 - [ ] Sessions stored in Redis/database
 - [ ] File uploads go to S3
@@ -222,20 +225,20 @@ Before proceeding to the [Containerizing Services Plan](../containerizing-servic
 
 ## 12-Factor Methodology Mapping
 
-| 12-Factor Principle        | Stories Implementing It                        |
-| -------------------------- | ---------------------------------------------- |
-| **I. Codebase**            | Already satisfied (git repo)                   |
-| **II. Dependencies**       | Containerizing Services Plan (Dockerfile)      |
-| **III. Config**            | Story 1, 2 (env vars, no secrets)              |
-| **IV. Backing Services**   | Story 3, 4, 8, 9 (S3, Redis, SES, EventBridge) |
-| **V. Build, Release, Run** | ECS Brownfield Migration Plan (CI/CD)          |
-| **VI. Processes**          | Story 4 (stateless, external sessions)         |
-| **VII. Port Binding**      | Containerizing Services Plan (network binding) |
-| **VIII. Concurrency**      | Story 10 (separate workers)                    |
-| **IX. Disposability**      | Containerizing Services Plan (SIGTERM)         |
-| **X. Dev/Prod Parity**     | Containerizing Services Plan (docker-compose)  |
-| **XI. Logs**               | Story 5 (stdout logging)                       |
-| **XII. Admin Processes**   | Story 9 (EventBridge for scheduled tasks)      |
+| 12-Factor Principle        | Stories Implementing It                               |
+| -------------------------- | ----------------------------------------------------- |
+| **I. Codebase**            | Already satisfied (git repo)                          |
+| **II. Dependencies**       | Containerizing Services Plan (Dockerfile)             |
+| **III. Config**            | Story 1, 2, 3 (env vars, no secrets, Secrets Manager) |
+| **IV. Backing Services**   | Story 3, 4, 8, 9 (S3, Redis, SES, EventBridge)        |
+| **V. Build, Release, Run** | ECS Brownfield Migration Plan (CI/CD)                 |
+| **VI. Processes**          | Story 4 (stateless, external sessions)                |
+| **VII. Port Binding**      | Containerizing Services Plan (network binding)        |
+| **VIII. Concurrency**      | Story 10 (separate workers)                           |
+| **IX. Disposability**      | Containerizing Services Plan (SIGTERM)                |
+| **X. Dev/Prod Parity**     | Containerizing Services Plan (docker-compose)         |
+| **XI. Logs**               | Story 5 (stdout logging)                              |
+| **XII. Admin Processes**   | Story 9 (EventBridge for scheduled tasks)             |
 
 ---
 

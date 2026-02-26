@@ -9,7 +9,7 @@ This document details the critical transition from stateful, server-bound applic
 **Key Themes:**
 
 - **Statelessness:** No client data stored on the container filesystem.
-- **Immutability:** Containers are replaced, never patched.
+- **Immutability:** Containers are replaced, never patched. This is also what makes Auto Scaling possible — an Auto Scaling Group (ASG) can spin up new instances and terminate old ones based on CPU/memory utilization without human intervention, because every instance is identical and disposable. If an instance holds local state (a user's session, an uploaded file), killing it breaks that user. Statelessness removes that constraint entirely.
 - **Externalized State:** All persistence moves to managed backing services (S3, Redis, RDS).
 
 ## Prerequisites
@@ -196,7 +196,9 @@ This phase ensures your application treats containers as ephemeral and cattle-no
 
   **Step 4: Add IAM Permissions**
 
-  ECS Task Role needs S3 access:
+  ECS Task Role needs S3 access (attach this policy to the ECS task role):
+
+  > **Transitional phase — EC2:** During the period when the application is still running on EC2 alongside ECS, attach this same policy to the **EC2 Instance Profile role**. EC2 instances use instance profile credentials (not task role credentials), so the policy must be explicitly added to both roles until the EC2 fleet is decommissioned.
 
   ```json
   {
@@ -215,6 +217,32 @@ This phase ensures your application treats containers as ephemeral and cattle-no
     ]
   }
   ```
+
+  > **Local development:** Your code now requires S3, which creates a problem for developers working locally — relying on a live AWS connection is slow and fragile, and giving every developer broad AWS credentials violates least privilege. The recommended solution is a local S3-compatible emulator via Docker Compose. [MinIO](https://min.io/) is the lightest option; [LocalStack](https://localstack.cloud/) emulates the broader AWS API surface if you need more services.
+  >
+  > ```yaml
+  > # docker-compose.yml (local dev only)
+  > services:
+  >   minio:
+  >     image: minio/minio
+  >     command: server /data --console-address ":9001"
+  >     ports:
+  >       - "9000:9000" # S3 API endpoint — point AWS_ENDPOINT_URL here
+  >       - "9001:9001" # MinIO web console
+  >     environment:
+  >       MINIO_ROOT_USER: minioadmin
+  >       MINIO_ROOT_PASSWORD: minioadmin
+  > ```
+  >
+  > ```bash
+  > # .env (local)
+  > AWS_ENDPOINT_URL=http://localhost:9000
+  > AWS_ACCESS_KEY_ID=minioadmin
+  > AWS_SECRET_ACCESS_KEY=minioadmin
+  > S3_BUCKET=my-app-uploads-dev
+  > ```
+  >
+  > AWS SDKs (boto3, `@aws-sdk/client-s3`) will automatically use `AWS_ENDPOINT_URL` when set, so no code changes are needed — just the env var.
 
   **Step 5: Migrate Existing Files**
 
@@ -277,6 +305,8 @@ This phase ensures your application treats containers as ephemeral and cattle-no
   | **Lifecycle Mgmt** | Built-in                | Manual                      |
   | **Recommendation** | **Default choice**      | Only if POSIX required      |
 
+  > **EFS caveat:** EFS cannot be mounted on Windows containers or Fargate tasks running a Windows OS. This guide assumes Linux containers, but it is worth knowing before choosing EFS for a mixed-OS environment.
+
 - **Acceptance Criteria:**
   - ✅ File uploads persist after container restart
   - ✅ No application errors when `/var/www/uploads` doesn't exist
@@ -294,7 +324,7 @@ This phase ensures your application treats containers as ephemeral and cattle-no
 
 ---
 
-## Story 2: Externalize Session Storage
+## Story 2.2: Externalize Session Storage
 
 - **Title:** Migrate Sessions to Redis/Database
 - **Persona:** As a **user**, I need my login session to persist across requests so that I am not randomly logged out when my requests hit different Fargate tasks behind the load balancer.
@@ -328,6 +358,15 @@ This phase ensures your application treats containers as ephemeral and cattle-no
     --show-cache-node-info \
     --query 'CacheClusters[0].CacheNodes[0].Endpoint'
   ```
+
+  > **Security Groups (required):** ElastiCache nodes deploy inside your VPC and are unreachable by default. Without an explicit inbound rule, EC2 instances and ECS tasks will time out connecting on port 6379. Add an inbound rule to the Redis Security Group allowing **TCP 6379** from the Application Security Group (the SG attached to your EC2 instances / ECS tasks). Scope it to the SG ID — not a CIDR — so the rule stays correct as instances are replaced.
+
+  > **Data persistence:** Standard ElastiCache Redis is in-memory only. If the Redis node reboots (maintenance, AZ failure), all sessions are lost and every active user is logged out. If that is a business risk, consider one of:
+  >
+  > - **Multi-AZ with automatic failover** — a read replica is promoted within seconds of a primary failure; session data is preserved.
+  > - **Redis AOF (append-only file) persistence** — ElastiCache supports this via the `appendonly yes` parameter group setting; AOF logs every write to disk so data survives a reboot.
+  >
+  > For session storage specifically, Multi-AZ failover is usually the right tradeoff: it protects against node failure without the write-latency overhead of AOF.
 
   **Step 2: Update Application Session Configuration**
 
@@ -380,25 +419,6 @@ This phase ensures your application treats containers as ephemeral and cattle-no
   'connection' => 'session',
   ```
 
-  **Python (Django) Example:**
-
-  ```python
-  # settings.py
-  CACHES = {
-      'default': {
-          'BACKEND': 'django_redis.cache.RedisCache',
-          'LOCATION': f"redis://{os.environ['REDIS_HOST']}:6379/1",
-          'OPTIONS': {
-              'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-              'PASSWORD': os.environ.get('REDIS_AUTH_TOKEN'),
-          }
-      }
-  }
-
-  SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
-  SESSION_CACHE_ALIAS = 'default'
-  ```
-
   **Step 3: Verify Session Sharing Across Instances**
 
   ```bash
@@ -426,23 +446,6 @@ This phase ensures your application treats containers as ephemeral and cattle-no
   TTL sess:abc123def456  # Should show remaining seconds
   ```
 
-  **Step 5: Alternative - Database Sessions (if Redis unavailable)**
-
-  **Node.js (connect-session-sequelize):**
-
-  ```javascript
-  const SequelizeStore = require("connect-session-sequelize")(session.Store);
-
-  app.use(
-    session({
-      store: new SequelizeStore({ db: sequelize }),
-      secret: process.env.SESSION_SECRET,
-      resave: false,
-      saveUninitialized: false,
-    }),
-  );
-  ```
-
   **Database sessions are slower but work:**
 
   | Store    | Latency | Scalability | Recommendation       |
@@ -468,8 +471,6 @@ This phase ensures your application treats containers as ephemeral and cattle-no
 ---
 
 ## Phase Completion Checklist
-
-Before proceeding to [Observability](3-observability.md) phase:
 
 - [ ] No files written to local filesystem for persistent storage
 - [ ] File uploads stored in S3 or EFS

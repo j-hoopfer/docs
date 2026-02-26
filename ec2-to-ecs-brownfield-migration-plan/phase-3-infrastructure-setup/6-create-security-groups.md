@@ -1,4 +1,4 @@
-# Activity 5: Security Infrastructure
+# Activity 6: Security Infrastructure
 
 **Goal:** Implement defense-in-depth networking by creating granular Security Groups before deploying any applications.
 
@@ -14,17 +14,17 @@ Security Groups are the primary firewall for your containers. By creating them u
 
 ### Prerequisites
 
-- [ ] [Activity 3: Shared Infrastructure](3-setup-shared-infrastructure.md) is complete.
-- [ ] Platform Repository Setup completed.
+- [ ] [Activity 4: Shared Infrastructure Setup](4-setup-shared-infra.md) is complete (ALB security group IDs are available as remote state outputs).
+- [ ] [Activity 5: Task Execution Role](5-task-execution-role.md) is complete.
 - [ ] Terraform state is clean and up to date.
 
-## Feature 5: Security Infrastructure
+## Feature 6: Security Infrastructure
 
 **Business Value:** Implements defense-in-depth security preventing direct container access even if IP addresses leak, reducing attack surface by 90%. Security group chaining (2-3 hours setup, free) ensures only ALB can reach containers, preventing lateral movement attacks where compromised instances attack other services. Required for PCI/SOC 2 compliance (network segmentation) and prevents 80% of cloud security breaches caused by overly permissive security rules.
 
 > **Note:** Security groups are infrastructure, owned by the SRE/Infra team. Creating them in Phase 3 allows parallel work — infra team sets up SGs while app teams work on Phase 2 containerization.
 
-### Story 5.1: Create Application Security Groups
+### Story 6.1: Create Application Security Groups
 
 - **Title:** Create Per-Application Security Groups for Fargate Tasks
 - **Target Repo:** `scale.infra-services` — `environments/dev/us-east-1/[app-name]/` (one stack per service)
@@ -65,27 +65,98 @@ Security Groups are the primary firewall for your containers. By creating them u
   - **Common Mistake:**
     - Using CIDR `10.100.0.0/20` as source instead of security group ID
     - This allows ANY resource in the VPC to connect, not just the ALB
-  - **Create all app SGs now:**
-    - Don't wait for Phase 3 — create SGs for all 10 apps upfront
-    - Infra team can batch this work while app teams containerize
-    - SGs are free (no cost until attached to resources)
+  - **Batch this work upfront:** Create SGs for all apps now while app teams are finishing containerization in Phase 2. SGs are free until attached, and having them ready unblocks parallel deployment work in Phase 4.
+
+**Terraform Example:**
+
+```hcl
+# File: environments/dev/us-east-1/auth-api/security_groups.tf
+
+data "terraform_remote_state" "platform_network" {
+  backend = "s3"
+  config = {
+    bucket = var.tf_state_bucket
+    key    = "infra-platform/dev/us-east-1/00-network/terraform.tfstate"
+    region = var.aws_region
+  }
+}
+
+data "terraform_remote_state" "platform_compute" {
+  backend = "s3"
+  config = {
+    bucket = var.tf_state_bucket
+    key    = "infra-platform/dev/us-east-1/01-compute/terraform.tfstate"
+    region = var.aws_region
+  }
+}
+
+resource "aws_security_group" "fargate_task" {
+  name        = "auth-api-fargate-sg"
+  description = "Security group for auth-api Fargate tasks — inbound from ALB only"
+  vpc_id      = data.terraform_remote_state.platform_network.outputs.vpc_id
+
+  tags = {
+    Name        = "auth-api-fargate-sg"
+    ManagedBy   = "terraform"
+    Environment = var.environment
+  }
+}
+
+# Inbound from the public ALB only — SG chaining, not CIDR
+resource "aws_vpc_security_group_ingress_rule" "fargate_from_public_alb" {
+  security_group_id            = aws_security_group.fargate_task.id
+  description                  = "Allow traffic from public ALB"
+  from_port                    = var.container_port
+  to_port                      = var.container_port
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = data.terraform_remote_state.platform_compute.outputs.alb_security_group_id
+}
+
+# Inbound from the internal ALB — enables Strangler Fig weighted routing
+resource "aws_vpc_security_group_ingress_rule" "fargate_from_internal_alb" {
+  security_group_id            = aws_security_group.fargate_task.id
+  description                  = "Allow traffic from internal ALB"
+  from_port                    = var.container_port
+  to_port                      = var.container_port
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = data.terraform_remote_state.platform_compute.outputs.internal_alb_security_group_id
+}
+
+# Outbound unrestricted — containers need to reach ECR, Secrets Manager, RDS, external APIs
+resource "aws_vpc_security_group_egress_rule" "fargate_outbound" {
+  security_group_id = aws_security_group.fargate_task.id
+  description       = "Allow all outbound"
+  ip_protocol       = "-1"
+  cidr_ipv4         = "0.0.0.0/0"
+}
+
+# Export the SG ID so Story 6.2 and Phase 4 service stacks can reference it
+output "fargate_task_sg_id" {
+  description = "Security group ID for auth-api Fargate tasks — used by Story 6.2 to scope RDS/ElastiCache ingress rules"
+  value       = aws_security_group.fargate_task.id
+}
+```
 
 - **Acceptance Criteria:**
-  - ✅ Security group created (or existing SG updated) for each application
-  - ✅ Inbound rule references ALB security group ID (not CIDR)
-  - ✅ Internal ALB SG added if using Internal ALB
-  - ✅ Application port documented per app
-  - ✅ Outbound allows internet access (for external APIs, etc.)
+  - ✅ One security group created per application in its `scale.infra-services` service directory
+  - ✅ Inbound rules reference ALB security group IDs (not CIDRs)
+  - ✅ Internal ALB SG inbound rule included (required for Strangler Fig routing in Phase 5)
+  - ✅ `container_port` set in each service's `.tfvars` file
+  - ✅ Outbound allows all traffic (containers need to reach ECR, Secrets Manager, RDS, external APIs)
+  - ✅ `fargate_task_sg_id` exported as a Terraform output in each service stack (required by Story 6.2)
+  - ✅ `terraform plan` shows no changes after apply
 
 ---
 
-### Story 5.2: Update Database Security Groups for Fargate Access
+### Story 6.2: Update Database Security Groups for Fargate Access
 
 - **Title:** Allow Fargate Task Security Groups to Access Databases
 - **Target Repo:** `scale.infra-platform` — `environments/dev/us-east-1/02-storage/` (or wherever your database Terraform state is managed)
 - **Persona:** As a **Security Engineer**, I want to update database security groups now so that Fargate tasks can connect when deployed in Phase 3.
 
 **Business Value:** Enables Fargate database connectivity while maintaining security boundaries, preventing Phase 3 deployment failures. Updating database SGs upfront (1-2 hours for all databases) eliminates "cannot connect to database" errors that block 40% of first Fargate deployments. Adding rules now (while preserving EC2 access) enables safe parallel migration without service interruption. Prevents 2-4 hour debugging cycles discovering SG issues after deployment.
+
+> **Replaces the temporary rule from Activity 2 Story 2.3.** That story added a broad VPC CIDR rule to the RDS SG as a placeholder to unblock initial task deployment. This story replaces it with scoped, per-app SG references — removing the temp rule once all app SGs are created.
 
 - **Requirements:**
   - RDS security group must allow inbound from each Fargate task security group
@@ -105,134 +176,50 @@ Security Groups are the primary firewall for your containers. By creating them u
     |------|------|--------|-------------|
     | Custom TCP | 6379 | `sg-xxx` (auth-api-fargate-sg) | Allow Redis from auth-api |
     | ... | ... | ... | (repeat for each app that needs Redis) |
-  - **Batch this work:**
-    - Add all app SGs to database SGs now
-    - Don't wait for each app to be deployed
-    - Rules referencing SGs that aren't attached to anything yet are harmless
-  - **Alternative: Shared Fargate SG:**
-    - Create one `fargate-apps-sg` used by all Fargate tasks
-    - Add only this one SG to database rules
-    - Simpler, but less granular (all apps can reach all databases)
-  - **Keep EC2 SG rules intact:**
-    - Don't remove the existing EC2 SG inbound rules
-    - EC2 apps still need database access during migration
-    - Remove EC2 rules after migration is complete
+  - **Batch this work:** Add all app SGs to database SGs now. Rules referencing SGs that aren't attached to anything yet are harmless.
+  - **Keep EC2 SG rules intact:** EC2 apps still need database access during the migration. Remove EC2 rules in Phase 6 after traffic has fully cut over to Fargate.
+  - **Remove the temp CIDR rule from Activity 2 Story 2.3** once all per-app rules below are in place.
 
 - **Acceptance Criteria:**
-  - ✅ RDS security group allows inbound from all Fargate task SGs
+  - ✅ RDS security group allows inbound from all Fargate task SGs (scoped per-app rules, not VPC CIDR)
   - ✅ ElastiCache security group allows inbound from all Fargate task SGs
+  - ✅ Temporary VPC CIDR rule from Activity 2 Story 2.3 removed
   - ✅ EC2 access rules preserved (for migration period)
-  - ✅ Changes documented for rollback if needed
+  - ✅ `terraform plan` shows no unexpected changes to other resources
 
----
+**Terraform Example:**
 
-### Story 5.3: Secrets Manager Setup (Overview)
+```hcl
+# File: scale.infra-platform — environments/dev/us-east-1/00-network/security_groups.tf
+# Add these rules after Story 6.1 has created and exported the fargate_task_sg_id for each app.
 
-**Business Value:** Eliminates hardcoded credentials security risk and enables automated secret rotation, critical for SOC 2/PCI compliance. Secrets Manager ($0.40/secret/month, typically $10-40/month total) prevents credentials in source code or task definitions, eliminating the #1 cause of cloud data breaches (exposed credentials). Automatic encryption, audit logging, and rotation prevent manual credential management overhead (2-4 hours/month) and eliminate "forgot to rotate production password" security incidents. Required for compliance certifications.
+# Read each service's fargate task SG from its own remote state
+data "terraform_remote_state" "auth_api" {
+  backend = "s3"
+  config = {
+    bucket = var.tf_state_bucket
+    key    = "infra-services/dev/us-east-1/auth-api/terraform.tfstate"
+    region = var.aws_region
+  }
+}
 
-#### Story 5.3 Details
+# RDS — allow auth-api Fargate tasks (replaces the temp VPC CIDR rule)
+resource "aws_vpc_security_group_ingress_rule" "rds_from_auth_api" {
+  security_group_id            = aws_security_group.rds.id
+  description                  = "Allow auth-api Fargate tasks to reach RDS"
+  from_port                    = 5432
+  to_port                      = 5432
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = data.terraform_remote_state.auth_api.outputs.fargate_task_sg_id
+}
 
-- **Title:** Migrate Secrets to AWS Secrets Manager
-- **Persona:** As a **Security Engineer**, I want application secrets stored in Secrets Manager so that credentials are encrypted, auditable, and not hardcoded in task definitions.
+# Remove the temporary broad rule added in Activity 2 Story 2.3
+removed {
+  from = aws_vpc_security_group_ingress_rule.rds_from_vpc_temp
+  lifecycle {
+    destroy = true
+  }
+}
 
-**Business Value:** Centralizes credential management with encryption, audit logging, and rotation capabilities, eliminating hardcoded secrets security risk. Migrating secrets to Secrets Manager (2-4 hours) prevents credentials exposure in code/configs that causes 60% of cloud breaches. Automatic rotation (optional, configured once) eliminates manual password changes that consume 2-4 hours/month and prevents forgot-to-rotate incidents. Audit logs satisfy compliance requirements (who accessed which secret when). Critical security foundation for production deployments.
-
-- **Requirements:**
-  - Database credentials stored securely
-  - API keys and tokens stored securely
-  - Secrets accessible by ECS tasks via IAM
-
-- **Implementation Details:**
-  - **Secret Naming Convention:**
-    - Pattern: `[environment]/[app-name]/[secret-type]`
-    - Examples:
-      - `production/auth-api/database` — DB credentials
-      - `production/auth-api/api-keys` — Third-party API keys
-      - `production/shared/redis` — Shared Redis password
-  - **Secret Structure (JSON):**
-    ```json
-    {
-      "username": "app_user",
-      "password": "super-secret-password",
-      "host": "mydb.cluster-abc123.us-east-1.rds.amazonaws.com",
-      "port": "5432",
-      "database": "auth_db"
-    }
-    ```
-  - **Accessing in ECS Task Definition:**
-    - Use `secrets` block (not `environment`)
-    - ECS injects values at container start
-    ```json
-    "secrets": [
-      {
-        "name": "DB_PASSWORD",
-        "valueFrom": "arn:aws:secretsmanager:us-east-1:123456789012:secret:production/auth-api/database:password::"
-      }
-    ]
-    ```
-  - **IAM Permissions:**
-    - Task Execution Role needs: `secretsmanager:GetSecretValue`
-    - Restrict to specific secret ARNs (least privilege)
-  - **Rotation (Optional):**
-    - Note: Deferred to Day 2.
-
-- **Acceptance Criteria:**
-  - ✅ Secrets created in Secrets Manager
-  - ✅ Secrets follow naming convention
-  - ✅ Task Execution Role has permission to read secrets
-  - ✅ No plaintext secrets in ECS Task Definition
-
----
-
-### Story 5.4: Task Execution Role (Shared)
-
-- **Title:** Create ECS Task Execution Role
-- **Persona:** As a **Cloud Admin**, I want a shared Task Execution Role so that Fargate can pull images and write logs without per-app IAM setup.
-
-- **Requirements:**
-  - Allows Fargate to pull images from ECR
-  - Allows Fargate to write logs to CloudWatch
-  - Allows Fargate to read secrets from Secrets Manager
-- **Implementation Details:**
-  - **Role Name:** `ecsTaskExecutionRole` (AWS convention)
-  - **Trust Policy:**
-    ```json
-    {
-      "Version": "2012-10-17",
-      "Statement": [
-        {
-          "Effect": "Allow",
-          "Principal": { "Service": "ecs-tasks.amazonaws.com" },
-          "Action": "sts:AssumeRole"
-        }
-      ]
-    }
-    ```
-  - **Managed Policies:**
-    - `AmazonECSTaskExecutionRolePolicy` (ECR pull, CloudWatch Logs)
-  - **Inline Policy (for Secrets Manager):**
-    ```json
-    {
-      "Version": "2012-10-17",
-      "Statement": [
-        {
-          "Effect": "Allow",
-          "Action": ["secretsmanager:GetSecretValue"],
-          "Resource": "arn:aws:secretsmanager:us-east-1:123456789012:secret:production/*"
-        }
-      ]
-    }
-    ```
-  - **Optional (for SSM Parameter Store):**
-    ```json
-    {
-      "Effect": "Allow",
-      "Action": ["ssm:GetParameters"],
-      "Resource": "arn:aws:ssm:us-east-1:123456789012:parameter/production/*"
-    }
-    ```
-
-- **Acceptance Criteria:**
-  - ✅ Role exists with correct trust policy
-  - ✅ Role has `AmazonECSTaskExecutionRolePolicy` attached
-  - ✅ Role can read from Secrets Manager (test with `aws sts assume-role`)
+# Repeat the pattern for each additional app and each data store (ElastiCache, etc.)
+```

@@ -14,7 +14,7 @@ Before we can layer new services on top, we must patch the foundation. This step
 
 ### Prerequisites
 
-- [ ] [Activity 1: Import Platform Infrastructure](1-import-platform-infrastructure.md) is complete (Current State is imported).
+- [ ] [Activity 1: Import Platform Infrastructure](1-import-platform-infra.md) is complete (Current State is imported).
 - [ ] [Infrastructure Audit](../../phase-1-discovery/2-infrastructure-audit.md) is complete (Gaps are identified).
 
 ---
@@ -26,7 +26,7 @@ Before we can layer new services on top, we must patch the foundation. This step
 ### Story 2.1: ECS Tasks Have Private Subnets to Run In
 
 - **Title:** Close the "Subnet Gap" (Add Private Subnets)
-- **Target Layer:** `environments/network/us-east-1/00-network` (Platform Account)
+- **Target Layer:** `scale.infra-platform` — `environments/dev/us-east-1/00-network/`
 - **Persona:** As a **Cloud Engineer**, I need to provision missing Private Subnets so that Fargate tasks can run securely without public IP addresses.
 
 **Why:** Fargate tasks in public subnets are a major security risk. To comply with "Secure by Design", tasks must live in Private Subnets.
@@ -45,7 +45,7 @@ Before we can layer new services on top, we must patch the foundation. This step
 ### Story 2.2: Containers Can Reach the Internet Without a Public IP
 
 - **Title:** Provision NAT Gateway for Private Subnets
-- **Target Layer:** `environments/network/us-east-1/00-network` (Platform Account)
+- **Target Layer:** `scale.infra-platform` — `environments/dev/us-east-1/00-network/`
 - **Persona:** As a **Cloud Engineer**, I need to ensure private subnets can reach AWS services (ECR, SSM) and the internet (for patches/3rd party APIs).
 
 **Why:** Without a NAT Gateway, Fargate tasks in private subnets cannot pull Docker images from ECR, causing immediate deployment failure (`CannotPullContainerError`).
@@ -66,21 +66,39 @@ Before we can layer new services on top, we must patch the foundation. This step
 ### Story 2.3: Database Traffic is Accepted from ECS Tasks Only
 
 - **Title:** Modernize Database Security Rules (Allow SG References)
-- **Target Layer:** `environments/network/us-east-1/00-network` OR `infra-platform` (wherever RDS is managed)
-- **Persona:** As a **DevOps Engineer**, I need to update the RDS Security Group to allow traffic from a future "Fargate Task Security Group", removing reliance on static EC2 IPs.
+- **Target Layer:** `scale.infra-platform` — `environments/dev/us-east-1/00-network/` (where `aws_security_group.rds` was imported in Activity 1)
+- **Persona:** As a **DevOps Engineer**, I need to update the RDS Security Group to allow traffic from Fargate tasks, removing reliance on static EC2 IPs that break with dynamic container networking.
 
-Legacy rules often whitelist specific EC2 Private IPs. Fargate tasks have dynamic IPs. If we don't fix this, the app will fail to connect to the DB.
+Legacy RDS security group rules commonly whitelist specific EC2 private IPs. Fargate tasks have fully dynamic IPs assigned at launch time — those static rules will silently fail the moment a Fargate task tries to connect to the database.
+
+**Strategy:** This story adds a temporary broad rule to the RDS SG now, so the network path is unblocked the moment the first Fargate task deploys. [Activity 6, Story 6.2](6-create-security-groups.md) replaces this broad rule with scoped per-app SG references once the Fargate task security groups exist.
 
 - **Implementation Details:**
-  - **Step 1: Create Placeholder SG for Tasks** (in `infra-services` or passed as output from Platform).
-    - Actually, typically the **Platform** exports the RDS SG ID, and the **Service** adds a rule to it.
-    - _Alternative Strategy:_ Create a common `shared-app-access-sg` in Platform, allow it in RDS, and attach it to Fargate tasks later.
-  - **Action:**
-    - Use `aws_security_group_rule` to allow TCP 5432 (or 3306) from the VPC CIDR (temporary broad fix) OR setup the structure for SG-to-SG referencing.
-    - **Recommended:** Create a `fargate-tasks-sg` (empty for now) in the Platform layer, and whitelist IT in the RDS SG. Later, Fargate services will use this SG.
+  - **Target file:** `security_groups.tf` in `00-network` (same file where `aws_security_group.rds` lives from Activity 1).
+  - **Action:** Add an `aws_vpc_security_group_ingress_rule` (or `aws_security_group_rule`) to the existing RDS SG allowing TCP on port 5432 (Postgres) or 3306 (MySQL) from the VPC CIDR block. Using the VPC CIDR is intentionally broad — it permits any resource in the VPC to reach the database, which is acceptable for the transition period but must be replaced.
+  - **Why not create a shared `fargate-tasks-sg` here?** A single shared SG attached to all tasks is simpler but coarser — all apps can reach all databases. Activity 6 creates per-app SGs in `infra-services` with explicit per-app rules, which provides the granularity needed for least-privilege. That approach supersedes the shared SG pattern.
+
+  ```hcl
+  # File: security_groups.tf (in 00-network)
+  # Temporary: allows any VPC resource to reach RDS on port 5432.
+  # REPLACED in Activity 6 Story 6.2 with scoped per-app Fargate SG rules.
+  resource "aws_vpc_security_group_ingress_rule" "rds_from_vpc_temp" {
+    security_group_id = aws_security_group.rds.id
+    description       = "TEMP: Allow Fargate tasks from VPC CIDR — replace with per-app SG rules in Activity 6"
+    from_port         = 5432
+    to_port           = 5432
+    ip_protocol       = "tcp"
+    cidr_ipv4         = aws_vpc.existing.cidr_block
+  }
+  ```
+
+  > **NOTE** Do not remove existing EC2 SG rules. EC2 instances still need database access during the migration. Only remove those rules in Phase 6 after traffic has fully cut over to Fargate.
 
 - **Acceptance Criteria:**
-  - ✅ RDS Security Group has a rule compatible with dynamic Fargate tasks (not just static IPs).
+  - ✅ RDS Security Group has an inbound rule that permits dynamic Fargate task IPs (VPC CIDR or SG reference — not static EC2 IPs).
+  - ✅ Existing EC2 SG rules remain intact.
+  - ✅ `terraform plan` shows no unexpected changes to other resources.
+  - ✅ Rule is annotated as temporary (`TEMP:` prefix in description) so it is easy to identify and remove in Activity 6.
 
 ### Story 2.4: Workload Account Can Manage DNS Records in the Payer Zone
 

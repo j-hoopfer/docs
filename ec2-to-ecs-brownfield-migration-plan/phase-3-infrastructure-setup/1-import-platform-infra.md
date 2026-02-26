@@ -331,6 +331,13 @@ This document details the process of importing legacy resources into the **Platf
       Name = "rds-sg"
     }
   }
+
+  # Exported so 02-storage can reference this SG when defining the RDS instance,
+  # and so Activity 6 can add Fargate task SG rules to it.
+  output "rds_sg_id" {
+    description = "Security group ID for the RDS instance — consumed by 02-storage and by Activity 6 when adding Fargate task SG ingress rules."
+    value       = aws_security_group.rds.id
+  }
   ```
 
   Run the import command:
@@ -406,13 +413,9 @@ This document details the process of importing legacy resources into the **Platf
 - **Acceptance Criteria:**
   - ✅ All existing network resources imported into `00-network` Terraform state
   - ✅ VPC created with DNS enabled (verified in imported state)
-  - ✅ S3 VPC Endpoint created (or verified existing)
   - ✅ Connectivity tested from private subnet
   - ✅ Public and Private subnets confirmed in 2 AZs
   - ✅ `terraform plan` shows zero changes (state matches reality)
   - ✅ VPC, subnets, route tables, IGW, NAT all under Terraform management
+  - ✅ `rds_sg_id` exported from `00-network` outputs (consumed by `02-storage`)
   - ✅ **Existing EC2 instances continue running normally — nothing disrupted**
-
-### Next Steps
-
-- Proceed to [Activity 1.2: Import Application Layer (EC2, RDS)](1.2-import-application-resources.md) to bring compute and database resources under management.

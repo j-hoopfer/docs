@@ -32,3 +32,12 @@ need to fix the ci items added to the repo setup, and i want them to be setup li
 
 
 need to confirm how i would query aws resources across multiple accounts
+
+
+phase 1 in application audit 
+Audit existing secrets, decide naming convention (env/app/type), identify all secret dependencies per app
+
+phase 2
+Create Secrets Manager secrets and populate them, so ARNs exist before task definitions are written
+
+App teams containerize assuming secrets are injected via environment — no hardcoded values

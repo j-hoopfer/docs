@@ -15,7 +15,7 @@ The work in this phase is divided into two sequential workstreams:
 
 Before you even write a Dockerfile, you must decouple your application from the server it runs on.
 
-- **[1. Configuration & Secrets](12-factor-prep/1-configuration-and-secrets.md):** Move config to environment variables.
+- **[1. Configuration & Secrets](12-factor-prep/1-configuration-and-secrets.md):** Move config to environment variables and create secrets in AWS Secrets Manager.
 - **[2. Stateless Application](12-factor-prep/2-stateless-application.md):** Move sessions to Redis/Database.
 - **[3. Observability](12-factor-prep/3-observability.md):** Structure logs to stdout/stderr.
 - **[4. Backing Services](12-factor-prep/4-backing-services.md):** Ensure DB/Cache are reachable via network.
@@ -36,3 +36,6 @@ Once the application logic is cloud-native, you package it into a container.
 - Application runs locally via `docker-compose`.
 - Passes all 12-Factor checks.
 - Docker images are built, scanned, and strictly versioned.
+- All application secrets created in AWS Secrets Manager with ARNs recorded.
+- `.env.example` committed to version control; `.env` in `.gitignore`.
+- No secrets or inline environment values in `docker-compose.yml`.

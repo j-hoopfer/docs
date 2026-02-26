@@ -285,11 +285,11 @@ Before automating deployments, we must verify that the "golden path" (build -> p
       "healthCheck": {
         "command": [
           "CMD-SHELL",
-          "curl -f http://localhost:3000/health || exit 1"
+          "curl -f http://localhost:3000/health/ready || exit 1"
         ],
         "interval": 30,
         "timeout": 5,
-        "retries": 3,
+        "retries": 5,
         "startPeriod": 60
       }
     }
@@ -322,10 +322,10 @@ Before automating deployments, we must verify that the "golden path" (build -> p
     - ✅ "My app listens on 3000" → Perfect, set `containerPort: 3000` and Target Group port to 3000
 
   - **Health Check Notes:**
+    - **Use `/health/ready` here (not `/health`)** — ECS should check dependency health, not just process liveness. The ALB target group uses `/health` (liveness only). Keeping them separate prevents a brief database outage from causing ECS to kill the entire task fleet simultaneously (the "health check suicide pact").
+    - `retries: 5` — tolerates 2.5 minutes of DB downtime (5 × 30s interval) before a task is marked unhealthy. Do not set this lower.
     - `startPeriod`: Grace period for container startup (increase if app is slow to start)
     - `interval`: How often to check (30s is reasonable)
-    - `retries`: Failed checks before marking unhealthy
-    - Alternative: Use ALB health checks only (simpler, but less granular)
   - **Stop Timeout:**
     - Default: 30 seconds
     - Increase if app needs more time for graceful shutdown

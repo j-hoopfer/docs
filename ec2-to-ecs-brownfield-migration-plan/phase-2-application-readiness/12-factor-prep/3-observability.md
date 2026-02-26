@@ -12,8 +12,6 @@ Moving to ephemeral containers requires robust observability—you can't SSH int
 
 - [ ] [Stateless Application](2-stateless-application.md) completed
 
-**Next Phase:** [Backing Services](4-backing-services.md)
-
 ---
 
 ## Feature 3: Observability & Telemetry
@@ -39,12 +37,10 @@ Moving to ephemeral containers requires robust observability—you can't SSH int
 
   The key insight: stdout logging works on EC2 too. The difference is what _captures_ it.
 
-  | Environment      | App logs to... | Captured by... | Ends up in...               |
-  | ---------------- | -------------- | -------------- | --------------------------- |
-  | EC2 (systemd)    | stdout         | journald       | `journalctl -u myapp`       |
-  | EC2 (PM2)        | stdout         | PM2            | `~/.pm2/logs/myapp-out.log` |
-  | EC2 (supervisor) | stdout         | supervisor     | configured `stdout_logfile` |
-  | ECS/Fargate      | stdout         | Docker/awslogs | CloudWatch Logs             |
+  | Environment   | App logs to... | Captured by... | Ends up in...         |
+  | ------------- | -------------- | -------------- | --------------------- |
+  | EC2 (systemd) | stdout         | journald       | `journalctl -u myapp` |
+  | ECS/Fargate   | stdout         | Docker/awslogs | CloudWatch Logs       |
 
   **Your EC2 process manager already captures stdout.** You're just telling the app to write there instead of to a file.
 
@@ -72,74 +68,6 @@ Moving to ephemeral containers requires robust observability—you can't SSH int
   // Usage
   logger.info("User logged in", { userId: 123, ip: "1.2.3.4" });
   logger.error("Database connection failed", { error: err.message });
-  ```
-
-  **Python:**
-
-  ```python
-  import logging
-  import sys
-  import json
-
-  # Configure JSON logging
-  class JsonFormatter(logging.Formatter):
-      def format(self, record):
-          return json.dumps({
-              'timestamp': self.formatTime(record),
-              'level': record.levelname,
-              'message': record.getMessage(),
-              'logger': record.name,
-              'extra': getattr(record, 'extra', {})
-          })
-
-  handler = logging.StreamHandler(sys.stdout)
-  handler.setFormatter(JsonFormatter())
-  logging.basicConfig(handlers=[handler], level=logging.INFO)
-
-  # Usage
-  logging.info("User logged in", extra={'userId': 123, 'ip': '1.2.3.4'})
-  ```
-
-  **PHP/Laravel:**
-
-  ```bash
-  # .env
-  LOG_CHANNEL=stderr  # or stdout
-  LOG_LEVEL=debug
-  ```
-
-  ```php
-  // config/logging.php
-  'stderr' => [
-      'driver' => 'monolog',
-      'handler' => StreamHandler::class,
-      'formatter' => env('LOG_STDERR_FORMATTER'),
-      'with' => [
-          'stream' => 'php://stderr',
-      ],
-  ],
-  ```
-
-  **Nginx (if running in same container):**
-
-  ```nginx
-  # nginx.conf
-  error_log /dev/stderr warn;
-  access_log /dev/stdout combined;
-
-  # Or JSON format for access logs
-  log_format json_combined escape=json
-    '{'
-      '"time":"$time_iso8601",'
-      '"remote_addr":"$remote_addr",'
-      '"request":"$request",'
-      '"status":$status,'
-      '"bytes":$body_bytes_sent,'
-      '"referer":"$http_referer",'
-      '"user_agent":"$http_user_agent"'
-    '}';
-
-  access_log /dev/stdout json_combined;
   ```
 
   **Step 2: Include Structured Metadata**
@@ -173,7 +101,7 @@ Moving to ephemeral containers requires robust observability—you can't SSH int
   - Error details (type, message, stack trace)
   - Business context (order ID, payment amount, etc.)
 
-  **Step 3: Update Log Consumers (CRITICAL)**
+  **Step 3: Update Log Consumers**
 
   **If you have log shippers (Filebeat, Fluentd, CloudWatch Agent):**
 
@@ -197,24 +125,7 @@ Moving to ephemeral containers requires robust observability—you can't SSH int
   StandardError=append:/var/log/myapp-error.log
   ```
 
-  **Step 4: Configure CloudWatch Logs (Phase 3 - ECS)**
-
-  This happens in Phase 3, but here's the preview:
-
-  ```json
-  {
-    "logConfiguration": {
-      "logDriver": "awslogs",
-      "options": {
-        "awslogs-group": "/ecs/my-app",
-        "awslogs-region": "us-east-1",
-        "awslogs-stream-prefix": "ecs"
-      }
-    }
-  }
-  ```
-
-  **Step 5: Test Locally**
+  **Step 4: Test Locally**
 
   ```bash
   # Run container and see logs
@@ -227,7 +138,7 @@ Moving to ephemeral containers requires robust observability—you can't SSH int
   docker logs my-app 2>&1 | jq 'select(.level == "error")'
   ```
 
-  **Step 6: Remove Old Log Files**
+  **Step 5: Remove Old Log Files**
 
   ```bash
   # Remove logrotate configs
@@ -237,7 +148,6 @@ Moving to ephemeral containers requires robust observability—you can't SSH int
   # Before:
   # RUN mkdir -p /var/log/app
 
-  # After: (remove this line)
   ```
 
 - **Acceptance Criteria:**
@@ -288,20 +198,6 @@ Moving to ephemeral containers requires robust observability—you can't SSH int
   // Node.js/Express
   app.get("/health", (req, res) => {
     res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
-  });
-  ```
-
-  ```python
-  # Python/Flask
-  @app.route('/health')
-  def health():
-      return jsonify({'status': 'ok', 'timestamp': datetime.now().isoformat()})
-  ```
-
-  ```php
-  // PHP
-  Route::get('/health', function () {
-      return response()->json(['status' => 'ok', 'timestamp' => now()->toISOString()]);
   });
   ```
 
@@ -421,42 +317,13 @@ Moving to ephemeral containers requires robust observability—you can't SSH int
   - **ALB health check** → `/health` (liveness only, doesn't check DB)
   - **ECS health check** → `/health/ready` (checks DB, but high retry count)
 
-  **Configuration:**
-
-  ```json
-  // ECS Task Definition - high retries tolerate brief DB issues
-  {
-    "healthCheck": {
-      "command": [
-        "CMD-SHELL",
-        "curl -f http://localhost:3000/health/ready || exit 1"
-      ],
-      "interval": 30,
-      "timeout": 5,
-      "retries": 5, // Tolerates 2.5 minutes of DB downtime
-      "startPeriod": 60
-    }
-  }
-  ```
-
-  This means task survives 5 consecutive failures = 2.5 minutes of DB downtime before being replaced.
-
-  **Step 6: Startup Grace Period**
-
-  Set `startPeriod` to allow warm-up time:
-
-  ```json
-  {
-    "startPeriod": 60 // Don't fail health checks for first 60 seconds
-  }
-  ```
+  The actual `healthCheck` block in the ECS task definition — including `retries` and `startPeriod` — is configured in [Phase 4: Deployment Artifacts](../../../../phase-4-initial-deployment/1-deployment-artifacts.md).
 
 - **Acceptance Criteria:**
   - ✅ `/health` returns 200 OK within 100ms
   - ✅ `/health/ready` returns 200 when all dependencies are available
   - ✅ `/health/ready` returns 503 when database is down
   - ✅ **ALB health check uses `/health` (liveness), not `/health/ready`**
-  - ✅ **ECS health check uses `/health/ready` with retries >= 5**
   - ✅ Response includes individual check status in JSON
   - ✅ Failed dependency checks log error messages
   - ✅ **Tested: Database outage for 30 seconds does NOT kill all tasks**
@@ -470,121 +337,6 @@ Moving to ephemeral containers requires robust observability—you can't SSH int
   - Test `/health/ready` with database stopped (should return 503)
   - Verify health checks don't impact application performance
 
----
-
-## Story 3: Implement Distributed Tracing (Optional)
-
-**Business Value:** Enables tracking requests across multiple services and containers, critical for debugging distributed systems. When a customer reports "checkout is slow," distributed tracing shows exactly which step is slow (payment API 3s, database query 500ms, etc.). This reduces troubleshooting time from hours to minutes. Most valuable for microservices architectures, less critical for monolithic apps.
-
-- **Title:** Add Request ID Propagation for Distributed Tracing
-- **Persona:** As a **developer**, I need to track requests across multiple services so that I can debug issues that span multiple containers/services.
-
-- **Requirements:**
-  - Every request generates or receives a unique request ID
-  - Request ID is included in all log entries
-  - Request ID is propagated to downstream services
-  - Request ID is returned in response headers
-
-- **Implementation Details:**
-
-  **Step 1: Generate/Extract Request ID**
-
-  ```javascript
-  const { v4: uuidv4 } = require("uuid");
-
-  app.use((req, res, next) => {
-    // Use existing request ID or generate new one
-    req.id =
-      req.headers["x-request-id"] || req.headers["x-amzn-trace-id"] || uuidv4();
-
-    // Add to response headers
-    res.setHeader("X-Request-ID", req.id);
-
-    next();
-  });
-  ```
-
-  **Step 2: Include in Logs**
-
-  ```javascript
-  // Add request ID to logger context
-  const logger = winston.createLogger({
-    format: winston.format.combine(
-      winston.format.timestamp(),
-      winston.format.printf(
-        (info) =>
-          `${info.timestamp} ${info.level}: [${info.requestId || "N/A"}] ${
-            info.message
-          }`,
-      ),
-    ),
-    transports: [new winston.transports.Console()],
-  });
-
-  app.use((req, res, next) => {
-    req.logger = logger.child({ requestId: req.id });
-    next();
-  });
-
-  // Usage
-  app.get("/api/users", (req, res) => {
-    req.logger.info("Fetching users");
-    // Log will include request ID
-  });
-  ```
-
-  **Step 3: Propagate to Downstream Services**
-
-  ```javascript
-  const axios = require("axios");
-
-  app.get("/api/orders", async (req, res) => {
-    // Forward request ID to downstream service
-    const response = await axios.get("http://inventory-service/api/stock", {
-      headers: {
-        "X-Request-ID": req.id,
-      },
-    });
-
-    res.json(response.data);
-  });
-  ```
-
-  **Step 4: AWS X-Ray Integration (Optional)**
-
-  For deeper tracing with AWS X-Ray:
-
-  ```javascript
-  const AWSXRay = require("aws-xray-sdk-core");
-  const app = express();
-
-  // Capture all AWS SDK calls
-  const AWS = AWSXRay.captureAWS(require("aws-sdk"));
-
-  // Capture HTTP requests
-  app.use(AWSXRay.express.openSegment("my-app"));
-
-  app.get("/api/users", async (req, res) => {
-    const subsegment = AWSXRay.getSegment().addNewSubsegment("database-query");
-    const users = await db.query("SELECT * FROM users");
-    subsegment.close();
-
-    res.json(users);
-  });
-
-  app.use(AWSXRay.express.closeSegment());
-  ```
-
-- **Acceptance Criteria:**
-  - ✅ Every request has a unique request ID
-  - ✅ Request ID included in all log entries for that request
-  - ✅ Request ID propagated to downstream services
-  - ✅ Request ID returned in response headers
-  - ✅ Can search CloudWatch Logs by request ID to see full request lifecycle
-  - ✅ X-Ray integration configured (if using)
-
----
-
 ## Phase Completion Checklist
 
 Before proceeding to [Backing Services](4-backing-services.md) phase:
@@ -597,7 +349,6 @@ Before proceeding to [Backing Services](4-backing-services.md) phase:
 - [ ] Health checks tested with dependency failures
 - [ ] ALB health check configuration planned (liveness only)
 - [ ] ECS health check configuration planned (readiness with high retries)
-- [ ] Request ID propagation implemented (if distributed tracing needed)
 - [ ] Application tested on EC2 with new logging and health checks
 
 ---

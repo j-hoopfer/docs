@@ -37,6 +37,16 @@ Replicating the production environment locally is key to velocity. By using `doc
 
 - **Implementation Details:**
 
+  **First-time setup — create your local `.env`:**
+
+  ```bash
+  # Copy the example file and populate with your local values
+  cp .env.example .env
+  # Edit .env with real local values — this file is gitignored, never commit it
+  ```
+
+  > **Why `env_file` instead of inline `environment:`?** Inline values in docker-compose are committed to git. Anything sensitive (DB passwords, API keys, AWS credentials) must live in `.env` instead, injected at runtime via `env_file`. This mirrors how ECS injects secrets in production — your app always reads `process.env.SECRET`, regardless of where the value came from. See [Appendix: Secrets Management for 12-Factor Applications](../appendix/secrets-for-12-factor-apps.md) for the full ADR.
+
   **Create docker-compose.yml:**
 
   ```yaml
@@ -51,19 +61,8 @@ Replicating the production environment locally is key to velocity. By using `doc
         dockerfile: Dockerfile
       ports:
         - "3000:3000"
-      environment:
-        NODE_ENV: development
-        DB_HOST: postgres
-        DB_PORT: 5432
-        DB_NAME: myapp
-        DB_USER: postgres
-        DB_PASSWORD: postgres
-        REDIS_HOST: redis
-        REDIS_PORT: 6379
-        AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
-        AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
-        AWS_REGION: us-east-1
-        S3_BUCKET: myapp-dev-uploads
+      env_file:
+        - .env # All app config and secrets come from here — never inline sensitive values
       volumes:
         # Hot reload - mount source code
         - .:/app
@@ -223,6 +222,7 @@ Replicating the production environment locally is key to velocity. By using `doc
 
   ```bash
   # First time setup
+  cp .env.example .env   # then populate .env with your local values
   docker-compose up -d
   docker-compose exec app npm run migrate
   docker-compose exec app npm run seed
@@ -343,6 +343,8 @@ Replicating the production environment locally is key to velocity. By using `doc
   - ✅ Code changes trigger hot reload
   - ✅ Tests pass in container
   - ✅ New developer can start in < 5 minutes
+  - ✅ No secrets or credentials in `docker-compose.yml` — all injected via `env_file: .env`
+  - ✅ `.env` is gitignored; `.env.example` is committed with placeholder values
 
 ---
 

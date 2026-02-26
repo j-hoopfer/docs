@@ -73,6 +73,7 @@ Before deploying to ECS, verify:
 - ✅ Container passes native HEALTHCHECK within 30 seconds
 - ✅ Read-only root filesystem validated (`--read-only` flag works)
 - ✅ No secrets baked into image layers
+- ✅ `.env.example` committed to version control; `.env` in `.gitignore`; `docker-compose.yml` uses `env_file: .env` (no inline secrets)
 
 ---
 
